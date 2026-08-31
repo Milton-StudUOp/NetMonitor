@@ -35,8 +35,8 @@ O desenvolvimento local usa SQLite por padrão. PostgreSQL/TimescaleDB e Redis s
 ## Execução com Docker
 
 ```bash
-git clone https://github.com/OWNER/REPOSITORY.git
-cd REPOSITORY
+git clone https://github.com/Milton-StudUOp/NetMonitor.git
+cd NetMonitor
 cp .env.example .env
 docker compose up -d --build
 ```
