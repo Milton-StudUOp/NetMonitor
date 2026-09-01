@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y \
     iputils-ping \
     libcap2-bin \
     libpq-dev \
+    unixodbc-dev \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 

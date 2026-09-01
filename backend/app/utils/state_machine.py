@@ -45,7 +45,7 @@ class StateTracker:
         if is_success:
             tracker["consecutive_successes"] += 1
             tracker["consecutive_failures"] = 0
-            if tracker["consecutive_successes"] >= self.successes_to_up or old_state == "UNKNOWN" or old_state == "DOWN":
+            if tracker["consecutive_successes"] >= self.successes_to_up or old_state == "UNKNOWN":
                 tracker["state"] = "UP"
         else:
             tracker["consecutive_failures"] += 1

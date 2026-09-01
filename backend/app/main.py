@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.database import Base, engine, async_session_factory
 from app.schema_migrations import ensure_runtime_schema
-from app.api import devices, links, interfaces, redundancy, alerts, topology, reports, websocket, history
+from app.api import devices, links, interfaces, redundancy, alerts, topology, reports, websocket, history, platform, discovery
 from app.services.monitoring_engine import monitoring_engine
 from app.models import Device, DeviceType, DeviceStatus, Interface, InterfaceStatus, Link, LinkType, LinkPriority, LinkStatus, RedundancyGroup, RedundancyStatus
 
@@ -23,6 +23,7 @@ async def lifespan(app: FastAPI):
     await ensure_runtime_schema(engine)
 
     # Start background monitoring engine
+    await monitoring_engine.load_configuration()
     monitoring_engine.start()
 
     yield
@@ -57,6 +58,8 @@ app.include_router(topology.router)
 app.include_router(reports.router)
 app.include_router(history.router)
 app.include_router(websocket.router)
+app.include_router(platform.router)
+app.include_router(discovery.router)
 
 
 @app.get("/health")

@@ -4,10 +4,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import DeclarativeBase
 
 from app.config import get_settings
+from app.db_bootstrap import load_active_database
 
 settings = get_settings()
+active_database_url, active_database_metadata = load_active_database(settings.DATABASE_URL, settings.SECRET_KEY)
 
-is_sqlite = settings.DATABASE_URL.startswith("sqlite")
+is_sqlite = active_database_url.startswith("sqlite")
 
 engine_kwargs = {
     "echo": settings.DEBUG,
@@ -21,7 +23,7 @@ else:
     engine_kwargs["max_overflow"] = 20
 
 engine = create_async_engine(
-    settings.DATABASE_URL,
+    active_database_url,
     **engine_kwargs
 )
 

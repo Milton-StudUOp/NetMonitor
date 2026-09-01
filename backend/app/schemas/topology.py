@@ -17,6 +17,11 @@ class TopologyNodeData(BaseModel):
     status: DeviceStatus
     location: str
     is_critical: bool
+    icon_id: Optional[int] = None
+    icon_key: Optional[str] = None
+    icon_name: Optional[str] = None
+    icon_custom_data: Optional[str] = None
+    icon_mime_type: Optional[str] = None
 
 
 class TopologyNode(BaseModel):

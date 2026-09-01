@@ -8,6 +8,7 @@ from app.models.alert import Alert, AlertSeverity
 from app.models.device import Device, DeviceStatus
 from app.models.link import Link, LinkPriority, LinkStatus, LinkType
 from app.models.redundancy_group import RedundancyGroup, RedundancyStatus, RedundancyType
+from app.models.platform import IconAsset
 from app.schemas.topology import (
     DashboardSummary,
     TopologyEdge,
@@ -25,6 +26,7 @@ router = APIRouter(tags=["Topology & Dashboard"])
 async def get_topology(db: AsyncSession = Depends(get_db)):
     devices_result = await db.execute(select(Device))
     devices = devices_result.scalars().all()
+    icons = {icon.id: icon for icon in (await db.execute(select(IconAsset))).scalars().all()}
 
     links_result = await db.execute(
         select(Link).options(
@@ -56,6 +58,11 @@ async def get_topology(db: AsyncSession = Depends(get_db)):
                 status=d.status,
                 location=d.location,
                 is_critical=d.is_critical,
+                icon_id=d.icon_id,
+                icon_key=icons[d.icon_id].key if d.icon_id in icons else None,
+                icon_name=icons[d.icon_id].lucide_name if d.icon_id in icons else None,
+                icon_custom_data=icons[d.icon_id].custom_data if d.icon_id in icons else None,
+                icon_mime_type=icons[d.icon_id].mime_type if d.icon_id in icons else None,
             ),
         )
         for d in devices

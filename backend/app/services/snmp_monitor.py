@@ -29,7 +29,7 @@ async def query_snmp_interface(
 
     try:
         from pysnmp.hlapi.asyncio import (
-            get_cmd,
+            getCmd,
             CommunityData,
             UdpTransportTarget,
             ContextData,
@@ -38,10 +38,10 @@ async def query_snmp_interface(
             SnmpEngine,
         )
 
-        error_indication, error_status, error_index, var_binds = await get_cmd(
+        error_indication, error_status, error_index, var_binds = await getCmd(
             SnmpEngine(),
             CommunityData(community, mpModel=1),  # v2c
-            await UdpTransportTarget.create((ip_address, port), timeout=2.0, retries=1),
+            UdpTransportTarget((ip_address, port), timeout=2.0, retries=1),
             ContextData(),
             ObjectType(ObjectIdentity(f"{OID_IF_OPER_STATUS}.{snmp_index}")),
             ObjectType(ObjectIdentity(f"{OID_IF_ADMIN_STATUS}.{snmp_index}")),

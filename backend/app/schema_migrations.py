@@ -15,6 +15,12 @@ async def ensure_runtime_schema(engine) -> None:
             await conn.exec_driver_sql(_add_column_sql(dialect, "devices", "gateway_device_id", "INTEGER"))
         if "primary_link_id" not in device_columns:
             await conn.exec_driver_sql(_add_column_sql(dialect, "devices", "primary_link_id", "INTEGER"))
+        if "group_name" not in device_columns:
+            await conn.exec_driver_sql(_add_column_sql(dialect, "devices", "group_name", "VARCHAR(128)"))
+        if "icon_id" not in device_columns:
+            await conn.exec_driver_sql(_add_column_sql(dialect, "devices", "icon_id", "INTEGER"))
+        if "monitoring_method" not in device_columns:
+            await conn.exec_driver_sql(_add_column_sql(dialect, "devices", "monitoring_method", "VARCHAR(24) DEFAULT 'ICMP'"))
 
         redundancy_columns = await conn.run_sync(
             lambda sync_conn: inspect(sync_conn).get_columns("redundancy_groups")

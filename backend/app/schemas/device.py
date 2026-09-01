@@ -18,6 +18,9 @@ class DeviceBase(BaseModel):
     manufacturer: Optional[str] = None
     model: Optional[str] = None
     function: Optional[str] = None
+    group_name: Optional[str] = None
+    icon_id: Optional[int] = None
+    monitoring_method: str = "ICMP"
     snmp_community: Optional[str] = None
     snmp_port: int = 161
     is_critical: bool = False
@@ -40,6 +43,9 @@ class DeviceUpdate(BaseModel):
     manufacturer: Optional[str] = None
     model: Optional[str] = None
     function: Optional[str] = None
+    group_name: Optional[str] = None
+    icon_id: Optional[int] = None
+    monitoring_method: Optional[str] = None
     snmp_community: Optional[str] = None
     snmp_port: Optional[int] = None
     is_critical: Optional[bool] = None
@@ -53,6 +59,8 @@ class DeviceRead(DeviceBase):
     status: DeviceStatus
     created_at: datetime
     updated_at: datetime
+    snmp_community: Optional[str] = Field(default=None, exclude=True)
+    snmp_configured: bool = False
 
 
 class DeviceStatusRead(BaseModel):

@@ -44,6 +44,9 @@ class Device(Base):
     manufacturer: Mapped[str | None] = mapped_column(String(128), nullable=True)
     model: Mapped[str | None] = mapped_column(String(128), nullable=True)
     function: Mapped[str | None] = mapped_column(Text, nullable=True)
+    group_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    icon_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("icon_assets.id"), nullable=True)
+    monitoring_method: Mapped[str] = mapped_column(String(24), default="ICMP")
     snmp_community: Mapped[str | None] = mapped_column(String(64), nullable=True)
     snmp_port: Mapped[int] = mapped_column(Integer, default=161)
     is_critical: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -81,3 +84,7 @@ class Device(Base):
 
     def __repr__(self) -> str:
         return f"<Device {self.name} ({self.device_type}) status={self.status}>"
+
+    @property
+    def snmp_configured(self) -> bool:
+        return bool(self.snmp_community)

@@ -10,6 +10,7 @@ from app.api.websocket import manager as ws_manager
 from app.services.notification.email import send_email_alert
 from app.services.notification.teams import send_teams_alert
 from app.services.notification.telegram import send_telegram_alert
+from app.services.notification.dispatcher import dispatch_persisted_notifications
 
 logger = structlog.get_logger()
 
@@ -44,6 +45,7 @@ async def trigger_alert(
         if root_cause:
             existing.root_cause = root_cause
         await db.commit()
+        asyncio.create_task(dispatch_persisted_notifications(title, message, severity.value, existing.id))
         return existing
 
     alert = Alert(
@@ -109,6 +111,15 @@ async def auto_resolve_alerts(
     if resolved:
         await db.commit()
         logger.info("alerts_auto_resolved", count=len(resolved))
+        for alert in resolved:
+            downtime = alert.resolved_at - alert.created_at.replace(tzinfo=None) if alert.created_at and alert.created_at.tzinfo else alert.resolved_at - alert.created_at
+            asyncio.create_task(dispatch_persisted_notifications(
+                f"RECOVERY: {alert.title}",
+                f"{resolution_message}. Downtime: {max(0, int(downtime.total_seconds() // 60))} minute(s).",
+                "INFO",
+                alert.id,
+                recovery=True,
+            ))
 
     return resolved
 
@@ -121,3 +132,4 @@ async def _dispatch_notifications(title: str, message: str, severity: str, alert
         channels.append("teams")
     if await send_telegram_alert(title, message, severity):
         channels.append("telegram")
+    await dispatch_persisted_notifications(title, message, severity, alert_id)

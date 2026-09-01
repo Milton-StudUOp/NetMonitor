@@ -1,7 +1,7 @@
 import asyncio
 import structlog
-from datetime import datetime
-from sqlalchemy import select
+from datetime import datetime, timedelta, timezone
+from sqlalchemy import delete, select
 from sqlalchemy.orm import selectinload
 
 from app.database import async_session_factory
@@ -17,6 +17,8 @@ from app.utils.state_machine import state_tracker
 from app.models.alert import AlertSeverity
 from app.services.alert_engine import trigger_alert, auto_resolve_alerts
 from app.api.websocket import manager as ws_manager
+from app.models.platform import SystemSetting
+from app.models.alert import Alert
 
 logger = structlog.get_logger()
 
@@ -26,6 +28,21 @@ class MonitoringEngine:
         self._running = False
         self._task: asyncio.Task | None = None
         self._latest_device_probes: dict[int, dict] = {}
+        self._cycle_interval = 5
+        self._retention_days = 90
+        self._last_retention_cleanup: datetime | None = None
+
+    async def load_configuration(self):
+        async with async_session_factory() as db:
+            setting = await db.get(SystemSetting, "general")
+            values = setting.value if setting else {}
+            self._cycle_interval = max(1, min(int(values.get("default_monitoring_interval", 5)), 60))
+            self._retention_days = max(1, int(values.get("retention_days", 90)))
+            state_tracker.failures_to_down = max(1, int(values.get("failure_threshold", state_tracker.failures_to_down)))
+            state_tracker.successes_to_up = max(1, int(values.get("success_threshold", state_tracker.successes_to_up)))
+            logger.info("monitoring_configuration_loaded", cycle_interval=self._cycle_interval,
+                retention_days=self._retention_days, failures_to_down=state_tracker.failures_to_down,
+                successes_to_up=state_tracker.successes_to_up)
 
     def start(self):
         if not self._running:
@@ -47,13 +64,22 @@ class MonitoringEngine:
                     await self._probe_all_devices(db)
                     await self._probe_all_links(db)
                     await self._evaluate_all_redundancy_groups(db)
+                    await self._cleanup_retention(db)
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error("monitoring_engine_loop_error", error=str(e))
 
             # Run cycle every 5 seconds
-            await asyncio.sleep(5)
+            await asyncio.sleep(self._cycle_interval)
+
+    async def _cleanup_retention(self, db):
+        now = datetime.now(timezone.utc)
+        if self._last_retention_cleanup and now - self._last_retention_cleanup < timedelta(hours=1): return
+        cutoff = now - timedelta(days=self._retention_days)
+        await db.execute(delete(MonitoringResult).where(MonitoringResult.timestamp < cutoff))
+        await db.execute(delete(Alert).where(Alert.is_resolved == True, Alert.resolved_at < cutoff))
+        await db.commit(); self._last_retention_cleanup = now
 
     async def _probe_all_devices(self, db):
         devices = (await db.execute(select(Device).options(
@@ -75,7 +101,9 @@ class MonitoringEngine:
                 device,
                 gateway_ping_cache,
             )
-            new_status = DeviceStatus.ONLINE if is_up else (
+            initial_state = "UP" if device.status == DeviceStatus.ONLINE else "DOWN" if device.status == DeviceStatus.OFFLINE else "UNKNOWN"
+            stable_state, _ = state_tracker.update("DEVICE", device.id, is_up, initial_state)
+            new_status = DeviceStatus.ONLINE if stable_state == "UP" else (
                 DeviceStatus.DEGRADED if dependency_down else DeviceStatus.OFFLINE
             )
             if device.status != new_status:
