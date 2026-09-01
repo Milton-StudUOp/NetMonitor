@@ -1,10 +1,11 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, JSON, String, Text, func
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Identity, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+from app.models.types import PortableJSON
 
 
 class AlertSeverity(str, enum.Enum):
@@ -16,7 +17,7 @@ class AlertSeverity(str, enum.Enum):
 class Alert(Base):
     __tablename__ = "alerts"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, Identity(), primary_key=True, index=True)
     severity: Mapped[AlertSeverity] = mapped_column(Enum(AlertSeverity), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(256), nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
@@ -27,7 +28,7 @@ class Alert(Base):
     )
     is_resolved: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     root_cause: Mapped[str | None] = mapped_column(Text, nullable=True)
-    notified_channels: Mapped[list | None] = mapped_column(JSON, nullable=True, default=list)
+    notified_channels: Mapped[list | None] = mapped_column(PortableJSON, nullable=True, default=list)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True
     )

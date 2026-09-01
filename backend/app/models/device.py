@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Identity, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -28,7 +28,7 @@ class DeviceStatus(str, enum.Enum):
 class Device(Base):
     __tablename__ = "devices"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, Identity(), primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
     ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)  # IPv4 or IPv6
     gateway_ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)

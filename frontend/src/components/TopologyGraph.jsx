@@ -256,17 +256,31 @@ export default function TopologyGraph({ graphData }) {
 
   const reloadSnapshots = () => api.get('/platform/topology-layout/snapshots').then(({ data }) => setSnapshots(data));
 
-  const saveSnapshot = async () => {
+  const snapshotPayload = (name) => ({
+    name,
+    layout_mode: layoutMode,
+    positions: nodes.map(node => ({ device_id:Number(node.id.replace('device_', '')), x:node.position.x, y:node.position.y })).filter(item => Number.isInteger(item.device_id)),
+    viewport: flowInstanceRef.current?.getViewport?.() || {},
+  });
+
+  const createSnapshot = async () => {
     const suggested = `Vista ${new Date().toLocaleString()}`;
     const name = window.prompt('Nome da vista/layout:', suggested)?.trim();
     if (!name) return;
-    const positions = nodes.map(node => ({ device_id:Number(node.id.replace('device_', '')), x:node.position.x, y:node.position.y })).filter(item => Number.isInteger(item.device_id));
     try {
-      const response = await api.post('/platform/topology-layout/snapshots', {
-        name, layout_mode:layoutMode, positions, viewport:flowInstanceRef.current?.getViewport?.() || {},
-      });
+      const response = await api.post('/platform/topology-layout/snapshots', snapshotPayload(name));
       await reloadSnapshots(); setSelectedSnapshotId(String(response.data.id));
     } catch (error) { console.error('Unable to save topology view', error); }
+  };
+
+  const saveSnapshot = async () => {
+    if (!selectedSnapshotId) return createSnapshot();
+    const selected = snapshots.find(snapshot => String(snapshot.id) === String(selectedSnapshotId));
+    if (!selected) return createSnapshot();
+    try {
+      await api.put(`/platform/topology-layout/snapshots/${selectedSnapshotId}`, snapshotPayload(selected.name));
+      await reloadSnapshots();
+    } catch (error) { console.error('Unable to update topology view', error); }
   };
 
   const restoreSnapshot = async () => {
@@ -391,7 +405,8 @@ export default function TopologyGraph({ graphData }) {
           <option value="">Vistas guardadas…</option>
           {snapshots.map(snapshot => <option key={snapshot.id} value={snapshot.id}>{snapshot.name}</option>)}
         </select>
-        <button type="button" className="btn btn-secondary" onClick={saveSnapshot} style={{ padding:'6px 9px', fontSize:'0.72rem' }} title="Guardar as posições e o zoom atuais"><Save size={14}/> Guardar vista</button>
+        <button type="button" className="btn btn-secondary" onClick={saveSnapshot} style={{ padding:'6px 9px', fontSize:'0.72rem' }} title={selectedSnapshotId ? 'Atualizar a vista selecionada' : 'Guardar uma nova vista'}><Save size={14}/> {selectedSnapshotId ? 'Salvar' : 'Guardar vista'}</button>
+        <button type="button" className="btn btn-secondary" onClick={createSnapshot} style={{ padding:'6px 9px', fontSize:'0.72rem' }} title="Guardar o layout atual como uma nova vista">+ Nova vista</button>
         <button type="button" className="btn btn-secondary" disabled={!selectedSnapshotId} onClick={restoreSnapshot} style={{ padding:'6px 9px', fontSize:'0.72rem' }} title="Recuperar a vista selecionada"><RotateCcw size={14}/> Recuperar</button>
         <button type="button" className="btn btn-danger" disabled={!selectedSnapshotId} onClick={deleteSnapshot} style={{ padding:'6px 8px', fontSize:'0.72rem' }} title="Eliminar a vista selecionada"><Trash2 size={14}/></button>
         <button type="button" className={`btn ${layoutMode === 'auto' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => changeLayoutMode('auto')} style={{ padding: '6px 9px', fontSize: '0.72rem' }} title="Organização hierárquica automática">

@@ -2,7 +2,6 @@ import asyncio
 import base64
 import json
 import smtplib
-import sqlite3
 from datetime import datetime, timezone
 from email.message import EmailMessage
 
@@ -12,7 +11,7 @@ from sqlalchemy import DateTime as SQLDateTime, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.database import active_database_metadata, active_database_url, engine
+import app.database as database
 from app.models.device import Device
 from app.models.interface import Interface
 from app.models.link import Link
@@ -24,6 +23,8 @@ from app.schemas.platform import (DatabaseConnectionInput, DatabaseConnectionRea
     NotificationRuleInput, NotificationRuleRead, SystemSettingsInput, TopologyLayoutInput, TopologySnapshotInput)
 from app.security import decrypt_secret, encrypt_secret
 from app.services.database_switcher import migrate_and_activate
+from app.services.database_adapters import execute_read_only, test_authenticated_connection, validate_database_url
+from app.db_bootstrap import get_previous_database, rollback_active_database
 
 router = APIRouter(prefix="/api/platform", tags=["Platform configuration"])
 BUILTIN_ICONS = [
@@ -90,11 +91,21 @@ async def list_databases(db: AsyncSession = Depends(get_db)):
 
 @router.get("/database-runtime")
 async def database_runtime():
-    if active_database_metadata:
-        return {"mode": "CONFIGURED", **active_database_metadata, "restart_pending": False}
+    if database.active_database_metadata:
+        return {"mode": "CONFIGURED", **database.active_database_metadata, "restart_pending": False}
     return {"mode": "DEFAULT", "connection_id": None, "name": "SQLite local",
-        "database_type": "SQLITE" if active_database_url.startswith("sqlite") else "ENVIRONMENT",
+        "database_type": "SQLITE" if database.active_database_url.startswith("sqlite") else "ENVIRONMENT",
         "activated_at": None, "restart_pending": False}
+
+
+@router.post("/database-runtime/rollback")
+async def rollback_database_runtime():
+    from app.config import get_settings
+    settings = get_settings(); previous = get_previous_database(settings.SECRET_KEY)
+    if not previous: raise HTTPException(404, "No previous database is available")
+    try: await asyncio.wait_for(validate_database_url(previous[0]), timeout=10)
+    except Exception as exc: raise HTTPException(409, "Previous database could not be reached or authenticated") from exc
+    return rollback_active_database(settings.SECRET_KEY)
 
 
 @router.post("/databases/{item_id}/activate")
@@ -106,7 +117,7 @@ async def activate_database(item_id: int, db: AsyncSession = Depends(get_db)):
         await _test_database(item)
         await _audit(db, "MIGRATION_STARTED", "DATABASE", item.id, f"Migration to {item.name} started")
         await db.commit()
-        result = await migrate_and_activate(engine, item)
+        result = await migrate_and_activate(database.engine, item)
         return result
     except Exception as exc:
         safe_reason = "The target is unavailable, not empty, lacks a compatible driver, or migration validation failed."
@@ -140,20 +151,7 @@ async def delete_database(item_id: int, db: AsyncSession = Depends(get_db)):
 
 
 async def _test_database(item: DatabaseConnection):
-    if item.database_type == "SQLITE":
-        await asyncio.to_thread(lambda: sqlite3.connect(item.database_name, timeout=3).close())
-        return
-    if item.database_type == "POSTGRESQL":
-        import asyncpg
-        connection = await asyncio.wait_for(asyncpg.connect(host=item.host, port=item.port or 5432,
-            database=item.database_name, user=item.username, password=decrypt_secret(item.encrypted_password),
-            ssl="require" if item.ssl_enabled else None, timeout=5), timeout=6)
-        try: await connection.execute("SELECT 1")
-        finally: await connection.close()
-        return
-    if not item.host or not item.port: raise ValueError("Host and port are required")
-    reader, writer = await asyncio.wait_for(asyncio.open_connection(item.host, item.port), timeout=5)
-    writer.close(); await writer.wait_closed()
+    await asyncio.wait_for(test_authenticated_connection(item), timeout=10)
 
 
 @router.post("/databases/{item_id}/test")
@@ -187,20 +185,7 @@ async def delete_data_source(item_id: int, db: AsyncSession = Depends(get_db)):
 
 
 async def _execute_data_source(source: DatabaseDataSource, connection: DatabaseConnection):
-    query = f"SELECT * FROM ({source.query_text}) AS netmonitor_source LIMIT 100"
-    if connection.database_type == "SQLITE":
-        def execute():
-            db = sqlite3.connect(connection.database_name, timeout=5); db.row_factory = sqlite3.Row
-            try: return [dict(row) for row in db.execute(query, source.parameters or {}).fetchall()]
-            finally: db.close()
-        return await asyncio.to_thread(execute)
-    if connection.database_type == "POSTGRESQL":
-        import asyncpg
-        db = await asyncpg.connect(host=connection.host, port=connection.port or 5432, database=connection.database_name,
-            user=connection.username, password=decrypt_secret(connection.encrypted_password), ssl="require" if connection.ssl_enabled else None, timeout=5)
-        try: return [dict(row) for row in await db.fetch(query, *(source.parameters or {}).values())]
-        finally: await db.close()
-    raise ValueError("Query execution driver is not installed for this database type")
+    return await asyncio.wait_for(execute_read_only(connection, source.query_text, source.parameters or {}), timeout=15)
 
 
 @router.post("/data-sources/{item_id}/test")
@@ -337,6 +322,24 @@ async def save_topology_snapshot(data: TopologySnapshotInput, db: AsyncSession =
     else:
         item = TopologySnapshot(name=data.name, layout_mode=data.layout_mode, positions=positions, viewport=data.viewport); db.add(item)
     await db.flush(); await _audit(db, "UPSERT", "TOPOLOGY_SNAPSHOT", item.id, f"Topology view {item.name} saved")
+    return {"id": item.id, "name": item.name, "layout_mode": item.layout_mode,
+        "positions": item.positions, "viewport": item.viewport}
+
+
+@router.put("/topology-layout/snapshots/{snapshot_id}")
+async def update_topology_snapshot(snapshot_id: int, data: TopologySnapshotInput, db: AsyncSession = Depends(get_db)):
+    item = await db.get(TopologySnapshot, snapshot_id)
+    if not item: raise HTTPException(404, "Topology view not found")
+    duplicate = (await db.execute(select(TopologySnapshot).where(
+        TopologySnapshot.name == data.name, TopologySnapshot.id != snapshot_id,
+    ))).scalar_one_or_none()
+    if duplicate: raise HTTPException(409, "Another topology view already uses this name")
+    item.name = data.name
+    item.layout_mode = data.layout_mode
+    item.positions = [position.model_dump() for position in data.positions]
+    item.viewport = data.viewport
+    await db.flush()
+    await _audit(db, "UPDATE", "TOPOLOGY_SNAPSHOT", item.id, f"Topology view {item.name} updated")
     return {"id": item.id, "name": item.name, "layout_mode": item.layout_mode,
         "positions": item.positions, "viewport": item.viewport}
 

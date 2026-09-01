@@ -9,23 +9,16 @@ from app.db_bootstrap import load_active_database
 settings = get_settings()
 active_database_url, active_database_metadata = load_active_database(settings.DATABASE_URL, settings.SECRET_KEY)
 
-is_sqlite = active_database_url.startswith("sqlite")
+def _create_engine(url: str):
+    kwargs = {"echo": settings.DEBUG}
+    if url.startswith("sqlite"):
+        kwargs["connect_args"] = {"check_same_thread": False}
+    else:
+        kwargs.update({"pool_pre_ping": True, "pool_size": 10, "max_overflow": 20})
+    return create_async_engine(url, **kwargs)
 
-engine_kwargs = {
-    "echo": settings.DEBUG,
-}
 
-if is_sqlite:
-    engine_kwargs["connect_args"] = {"check_same_thread": False}
-else:
-    engine_kwargs["pool_pre_ping"] = True
-    engine_kwargs["pool_size"] = 10
-    engine_kwargs["max_overflow"] = 20
-
-engine = create_async_engine(
-    active_database_url,
-    **engine_kwargs
-)
+engine = _create_engine(active_database_url)
 
 async_session_factory = async_sessionmaker(
     bind=engine,
@@ -36,6 +29,17 @@ async_session_factory = async_sessionmaker(
 
 class Base(DeclarativeBase):
     pass
+
+
+async def switch_runtime_engine(url: str, metadata: dict | None = None):
+    global engine, active_database_url, active_database_metadata
+    previous_engine = engine
+    engine = _create_engine(url)
+    active_database_url = url
+    active_database_metadata = metadata
+    async_session_factory.configure(bind=engine)
+    await previous_engine.dispose()
+    return engine
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

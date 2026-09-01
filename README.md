@@ -78,7 +78,7 @@ O processo de promoção:
 6. grava a seleção em arquivo local criptografado;
 7. solicita reinício do backend.
 
-O banco anterior não é apagado. Consulte [Migração de banco](docs/DATABASES.md).
+O banco anterior não é apagado. Se o banco promovido falhar no startup, o backend retorna automaticamente ao anterior. Consulte [Migração de banco](docs/DATABASES.md).
 
 ## Descoberta de rede
 
@@ -121,7 +121,6 @@ cd backend
 cd ..\frontend
 npm run build
 ```
-
 ## Documentação
 
 - [Arquitetura e persistência](docs/ARCHITECTURE.md)

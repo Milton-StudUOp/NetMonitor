@@ -1,30 +1,14 @@
 from datetime import datetime, timezone
-from pathlib import Path
-from urllib.parse import quote_plus
-
 from sqlalchemy import func, insert, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from app.config import get_settings
 from app.database import Base
+import app.database as database
 from app.db_bootstrap import save_active_database
 from app.models.platform import DatabaseConnection
-from app.security import decrypt_secret
-
-
-def build_database_url(item: DatabaseConnection) -> str:
-    password = quote_plus(decrypt_secret(item.encrypted_password) or "")
-    username = quote_plus(item.username or "")
-    host = item.host or "localhost"
-    if item.database_type == "SQLITE":
-        path = Path(item.database_name).expanduser().resolve()
-        return f"sqlite+aiosqlite:///{path.as_posix()}"
-    credentials = f"{username}:{password}@" if username or password else ""
-    if item.database_type == "POSTGRESQL": return f"postgresql+asyncpg://{credentials}{host}:{item.port or 5432}/{item.database_name}"
-    if item.database_type == "MYSQL": return f"mysql+asyncmy://{credentials}{host}:{item.port or 3306}/{item.database_name}"
-    if item.database_type == "MSSQL": return f"mssql+aioodbc://{credentials}{host}:{item.port or 1433}/{item.database_name}?driver=ODBC+Driver+18+for+SQL+Server"
-    if item.database_type == "ORACLE": return f"oracle+oracledb_async://{credentials}{host}:{item.port or 1521}/?service_name={quote_plus(item.database_name)}"
-    raise ValueError("Unsupported database type")
+from app.services.database_adapters import (after_table_insert, before_table_insert,
+    build_database_url, synchronize_generated_keys)
 
 
 async def migrate_and_activate(source_engine: AsyncEngine, item: DatabaseConnection) -> dict:
@@ -50,7 +34,7 @@ async def migrate_and_activate(source_engine: AsyncEngine, item: DatabaseConnect
             populated = []
             for table in tables:
                 count = int((await connection.execute(select(func.count()).select_from(table))).scalar_one())
-                if count and source_counts[table.name]: populated.append(table.name)
+                if count: populated.append(table.name)
         if populated:
             raise ValueError("Target database is not empty: " + ", ".join(populated[:8]))
 
@@ -61,13 +45,17 @@ async def migrate_and_activate(source_engine: AsyncEngine, item: DatabaseConnect
                 if table.name == "devices":
                     deferred_device_references = [{"id": row["id"], "gateway_device_id": row.get("gateway_device_id"), "primary_link_id": row.get("primary_link_id")} for row in rows]
                     rows = [{**row, "gateway_device_id": None, "primary_link_id": None} for row in rows]
-                if rows: await destination.execute(insert(table), rows)
+                if rows:
+                    await before_table_insert(destination, item.database_type, table)
+                    try: await destination.execute(insert(table), rows)
+                    finally: await after_table_insert(destination, item.database_type, table)
             devices = tables_by_name.get("devices")
             if devices is not None:
                 for references in deferred_device_references:
                     if references["gateway_device_id"] is not None or references["primary_link_id"] is not None:
                         await destination.execute(update(devices).where(devices.c.id == references["id"]).values(
                             gateway_device_id=references["gateway_device_id"], primary_link_id=references["primary_link_id"]))
+            await synchronize_generated_keys(destination, item.database_type, tables)
 
         target_counts = {}
         async with target.connect() as connection:
@@ -79,7 +67,9 @@ async def migrate_and_activate(source_engine: AsyncEngine, item: DatabaseConnect
         settings = get_settings()
         activated_at = datetime.now(timezone.utc).isoformat()
         save_active_database(target_url, settings.SECRET_KEY, {"connection_id": item.id, "name": item.name,
-            "database_type": item.database_type, "activated_at": activated_at})
+            "database_type": item.database_type, "activated_at": activated_at}, previous_url=database.active_database_url,
+            previous_metadata=database.active_database_metadata or {"name": "Banco padrão anterior",
+                "database_type": "SQLITE" if database.active_database_url.startswith("sqlite") else "ENVIRONMENT"})
         return {"status": "READY", "restart_required": True, "connection_id": item.id,
             "database_name": item.name, "database_type": item.database_type,
             "migrated_records": sum(source_counts.values()), "tables_validated": len(source_counts), "activated_at": activated_at}

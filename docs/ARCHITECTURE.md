@@ -26,6 +26,8 @@ O frontend só considera uma alteração persistida depois da resposta de sucess
 6. O monitoramento periódico é iniciado.
 7. Frontend carrega dashboard, topologia e configurações pelas APIs.
 
+Se a criação/validação do schema no banco selecionado falhar, o startup autentica no banco anterior registrado, troca o engine e reconfigura a mesma `async_session_factory`; serviços já importados passam a usar o bind recuperado.
+
 ## Persistência
 
 São persistidos:

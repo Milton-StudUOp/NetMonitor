@@ -4,7 +4,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.database import Base, engine, async_session_factory
+from app.database import Base, async_session_factory
+import app.database as database
+from app.db_bootstrap import get_previous_database, rollback_active_database
 from app.schema_migrations import ensure_runtime_schema
 from app.api import devices, links, interfaces, redundancy, alerts, topology, reports, websocket, history, platform, discovery
 from app.services.monitoring_engine import monitoring_engine
@@ -18,9 +20,23 @@ settings = get_settings()
 async def lifespan(app: FastAPI):
     logger.info("application_startup")
     # Initialize DB tables
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    await ensure_runtime_schema(engine)
+    try:
+        async with database.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        await ensure_runtime_schema(database.engine)
+    except Exception as startup_error:
+        previous = get_previous_database(settings.SECRET_KEY)
+        if not previous:
+            raise
+        logger.error("primary_database_startup_failed_rolling_back", error=type(startup_error).__name__)
+        rollback = rollback_active_database(settings.SECRET_KEY)
+        await database.switch_runtime_engine(previous[0], {"connection_id": None, "name": rollback["name"],
+            "database_type": rollback["database_type"], "activated_at": rollback["activated_at"],
+            "rollback_available": True})
+        async with database.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        await ensure_runtime_schema(database.engine)
+        logger.warning("primary_database_rollback_completed", database=rollback["name"])
 
     # Start background monitoring engine
     await monitoring_engine.load_configuration()

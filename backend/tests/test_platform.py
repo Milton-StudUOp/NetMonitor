@@ -1,12 +1,9 @@
 import asyncio
 import os
 import shutil
-import tempfile
 from pathlib import Path
 
-TEST_DIR = Path(tempfile.mkdtemp(prefix="netmonitor-tests-"))
-os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{(TEST_DIR / 'source.db').as_posix()}"
-os.environ["SECRET_KEY"] = "automated-test-secret"
+TEST_DIR = Path(os.environ["NETMONITOR_TEST_DIR"])
 
 import pytest
 from fastapi.testclient import TestClient
@@ -80,6 +77,17 @@ def test_topology_and_backup_round_trip(client):
     client.put("/api/platform/topology-layout", json={"layout_mode": "free", "positions": []})
     restored_view = client.post(f"/api/platform/topology-layout/snapshots/{snapshot.json()['id']}/restore")
     assert restored_view.status_code == 200
+
+    updated = client.put(f"/api/platform/topology-layout/snapshots/{snapshot.json()['id']}", json={
+        "name": "Operacao principal", "layout_mode": "auto",
+        "positions": [{"device_id": gateway.json()["id"], "x": 333.0, "y": 444.0}],
+        "viewport": {"x": 12, "y": 24, "zoom": 1.5},
+    })
+    assert updated.status_code == 200
+    assert updated.json()["id"] == snapshot.json()["id"]
+    assert updated.json()["name"] == "Operacao principal"
+    assert updated.json()["positions"][0]["x"] == 333.0
+    assert len(client.get("/api/platform/topology-layout/snapshots").json()) == 1
     assert len(restored_view.json()["positions"]) == 2
     backup = client.get("/api/platform/configuration/export")
     assert backup.status_code == 200
@@ -101,3 +109,6 @@ def test_primary_database_migration(client):
     assert activated.json()["migrated_records"] > 0
     assert bootstrap.BOOTSTRAP_FILE.exists()
     assert str(target) not in bootstrap.BOOTSTRAP_FILE.read_text(encoding="utf-8")
+    rollback = client.post("/api/platform/database-runtime/rollback")
+    assert rollback.status_code == 200, rollback.text
+    assert rollback.json()["restart_required"] is True

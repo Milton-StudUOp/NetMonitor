@@ -16,6 +16,8 @@ Este documento substitui a especificação inicial e registra a situação efeti
 | Layout persistente | Concluído | `topology_positions`, sem dependência de localStorage |
 | Múltiplas conexões de banco | Concluído | SQLite/PostgreSQL/MySQL/MSSQL/Oracle |
 | Escolher banco principal | Concluído | Migração, validação e ativação após restart |
+| Identities/sequences multibanco | Concluído | Adaptadores PostgreSQL/MySQL/MSSQL/Oracle |
+| Rollback de banco | Concluído | Manual validado e fallback automático no startup |
 | Fontes SQL externas | Concluído | SELECT parametrizado e limitado |
 | Email, Telegram e WhatsApp | Concluído | Credenciais criptografadas e teste individual |
 | Regras de notificação | Concluído | Eventos, severidade, canais, recuperação e lembrete |

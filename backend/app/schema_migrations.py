@@ -56,6 +56,15 @@ async def ensure_runtime_schema(engine) -> None:
                     await conn.exec_driver_sql(
                         "ALTER TABLE redundancy_groups ALTER COLUMN secondary_link_id DROP NOT NULL"
                     )
+                elif dialect in {"mysql", "mariadb"}:
+                    await conn.exec_driver_sql("ALTER TABLE redundancy_groups MODIFY COLUMN primary_link_id INTEGER NULL")
+                    await conn.exec_driver_sql("ALTER TABLE redundancy_groups MODIFY COLUMN secondary_link_id INTEGER NULL")
+                elif dialect == "mssql":
+                    await conn.exec_driver_sql("ALTER TABLE redundancy_groups ALTER COLUMN primary_link_id INTEGER NULL")
+                    await conn.exec_driver_sql("ALTER TABLE redundancy_groups ALTER COLUMN secondary_link_id INTEGER NULL")
+                elif dialect == "oracle":
+                    await conn.exec_driver_sql("ALTER TABLE redundancy_groups MODIFY (primary_link_id NULL)")
+                    await conn.exec_driver_sql("ALTER TABLE redundancy_groups MODIFY (secondary_link_id NULL)")
 
 
 def _add_column_sql(dialect: str, table_name: str, column_name: str, column_type: str) -> str:
