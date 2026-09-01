@@ -36,7 +36,7 @@ async def migrate_and_activate(source_engine: AsyncEngine, item: DatabaseConnect
 
         priority = ["icon_assets", "devices", "interfaces", "links", "redundancy_groups",
             "database_connections", "database_data_sources", "notification_integrations",
-            "notification_rules", "notification_deliveries", "topology_positions", "system_settings", "monitoring_results",
+            "notification_rules", "notification_deliveries", "topology_positions", "topology_snapshots", "system_settings", "monitoring_results",
             "alerts", "audit_logs"]
         tables_by_name = Base.metadata.tables
         tables = [tables_by_name[name] for name in priority if name in tables_by_name]

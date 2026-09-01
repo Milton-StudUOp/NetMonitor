@@ -4,7 +4,6 @@ import api from '../api/client';
 import StatusCard from '../components/StatusCard';
 import AlertBanner from '../components/AlertBanner';
 import RedundancyPanel from '../components/RedundancyPanel';
-import LatencyChart from '../components/LatencyChart';
 import TopologyGraph from '../components/TopologyGraph';
 
 export default function Dashboard() {
@@ -97,17 +96,12 @@ export default function Dashboard() {
         )}
       </div>
 
-      {/* Topology & Performance Chart Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-        <div>
+      {/* Full-width topology */}
+      <div>
           <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#fff', marginBottom: '12px' }}>
             Mapa da Topologia de Enlaces
           </h3>
           <TopologyGraph graphData={topology} />
-        </div>
-        <div>
-          <LatencyChart />
-        </div>
       </div>
     </div>
   );

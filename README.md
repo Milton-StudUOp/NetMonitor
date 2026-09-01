@@ -97,6 +97,8 @@ O limite é de 1.024 hosts por pesquisa e 64 portas por alvo. Credenciais usadas
 - **Automático** recalcula a hierarquia.
 - **Livre** permite arrastar os equipamentos e persiste as coordenadas no banco.
 - **Reorganizar** recalcula e grava uma nova disposição.
+- **Guardar vista** cria uma cópia nomeada das posições, modo, zoom e enquadramento atuais.
+- **Recuperar** restaura uma vista guardada caso a topologia seja desorganizada.
 - O ícone é escolhido em **Equipamentos → Editar → Ícone do equipamento**.
 - Ícones próprios são carregados em **Configurações → Ícones**.
 

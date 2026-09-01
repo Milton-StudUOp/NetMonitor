@@ -291,4 +291,5 @@ body {
 .icon-library span,.icon-library small { color:var(--text-dim); font-size:.68rem; }.icon-library strong{font-size:.8rem;color:#fff}
 .current-database { display:flex; align-items:center; gap:10px; padding:12px; margin-bottom:10px; border:1px solid #10b98155; background:#064e3b35; border-radius:8px; }
 .current-database span { color:#34d399; font-size:.65rem; font-weight:700; }.current-database strong{color:#fff}.current-database small{color:var(--text-muted)}
+.topology-canvas:fullscreen { width:100vw !important; height:100vh !important; border:0 !important; border-radius:0 !important; }
 @media(max-width:1100px){.provider-grid{grid-template-columns:1fr}.settings-grid{grid-template-columns:1fr}}

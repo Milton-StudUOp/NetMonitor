@@ -17,11 +17,11 @@ from app.models.device import Device
 from app.models.interface import Interface
 from app.models.link import Link
 from app.models.platform import (AuditLog, DatabaseConnection, DatabaseDataSource, IconAsset,
-    NotificationIntegration, NotificationRule, SystemSetting, TopologyPosition)
+    NotificationIntegration, NotificationRule, SystemSetting, TopologyPosition, TopologySnapshot)
 from app.models.redundancy_group import RedundancyGroup
 from app.schemas.platform import (DatabaseConnectionInput, DatabaseConnectionRead, DatabaseDataSourceInput, DatabaseDataSourceRead,
     IconRead, NotificationIntegrationInput, NotificationIntegrationRead,
-    NotificationRuleInput, NotificationRuleRead, SystemSettingsInput, TopologyLayoutInput)
+    NotificationRuleInput, NotificationRuleRead, SystemSettingsInput, TopologyLayoutInput, TopologySnapshotInput)
 from app.security import decrypt_secret, encrypt_secret
 from app.services.database_switcher import migrate_and_activate
 
@@ -320,6 +320,48 @@ async def save_layout(data: TopologyLayoutInput, db: AsyncSession = Depends(get_
     return {"status": "saved", "count": len(data.positions)}
 
 
+@router.get("/topology-layout/snapshots")
+async def list_topology_snapshots(db: AsyncSession = Depends(get_db)):
+    rows = (await db.execute(select(TopologySnapshot).order_by(TopologySnapshot.updated_at.desc()))).scalars().all()
+    return [{"id": row.id, "name": row.name, "layout_mode": row.layout_mode,
+        "positions": row.positions or [], "viewport": row.viewport or {},
+        "created_at": row.created_at, "updated_at": row.updated_at} for row in rows]
+
+
+@router.post("/topology-layout/snapshots", status_code=201)
+async def save_topology_snapshot(data: TopologySnapshotInput, db: AsyncSession = Depends(get_db)):
+    item = (await db.execute(select(TopologySnapshot).where(TopologySnapshot.name == data.name))).scalar_one_or_none()
+    positions = [position.model_dump() for position in data.positions]
+    if item:
+        item.layout_mode, item.positions, item.viewport = data.layout_mode, positions, data.viewport
+    else:
+        item = TopologySnapshot(name=data.name, layout_mode=data.layout_mode, positions=positions, viewport=data.viewport); db.add(item)
+    await db.flush(); await _audit(db, "UPSERT", "TOPOLOGY_SNAPSHOT", item.id, f"Topology view {item.name} saved")
+    return {"id": item.id, "name": item.name, "layout_mode": item.layout_mode,
+        "positions": item.positions, "viewport": item.viewport}
+
+
+@router.post("/topology-layout/snapshots/{snapshot_id}/restore")
+async def restore_topology_snapshot(snapshot_id: int, db: AsyncSession = Depends(get_db)):
+    item = await db.get(TopologySnapshot, snapshot_id)
+    if not item: raise HTTPException(404, "Topology view not found")
+    valid_devices = set((await db.execute(select(Device.id))).scalars().all())
+    positions = [position for position in (item.positions or []) if position.get("device_id") in valid_devices]
+    await db.execute(delete(TopologyPosition))
+    db.add_all([TopologyPosition(device_id=position["device_id"], x=position["x"], y=position["y"], layout_mode=item.layout_mode) for position in positions])
+    setting = await db.get(SystemSetting, "topology") or SystemSetting(key="topology"); setting.value = {"layout_mode": item.layout_mode}; db.add(setting)
+    await _audit(db, "RESTORE", "TOPOLOGY_SNAPSHOT", item.id, f"Topology view {item.name} restored")
+    return {"id": item.id, "name": item.name, "layout_mode": item.layout_mode,
+        "positions": positions, "viewport": item.viewport or {}}
+
+
+@router.delete("/topology-layout/snapshots/{snapshot_id}", status_code=204)
+async def delete_topology_snapshot(snapshot_id: int, db: AsyncSession = Depends(get_db)):
+    item = await db.get(TopologySnapshot, snapshot_id)
+    if not item: raise HTTPException(404, "Topology view not found")
+    await _audit(db, "DELETE", "TOPOLOGY_SNAPSHOT", item.id, f"Topology view {item.name} deleted"); await db.delete(item)
+
+
 @router.get("/settings")
 async def get_settings(db: AsyncSession = Depends(get_db)):
     item = await db.get(SystemSetting, "general")
@@ -343,7 +385,7 @@ async def audit_logs(limit: int = 100, db: AsyncSession = Depends(get_db)):
 
 @router.get("/configuration/export")
 async def export_configuration(db: AsyncSession = Depends(get_db)):
-    devices = (await db.execute(select(Device))).scalars().all(); interfaces = (await db.execute(select(Interface))).scalars().all(); links = (await db.execute(select(Link))).scalars().all(); icons = (await db.execute(select(IconAsset))).scalars().all(); rules = (await db.execute(select(NotificationRule))).scalars().all(); settings = (await db.execute(select(SystemSetting))).scalars().all(); positions = (await db.execute(select(TopologyPosition))).scalars().all(); redundancy = (await db.execute(select(RedundancyGroup))).scalars().all()
+    devices = (await db.execute(select(Device))).scalars().all(); interfaces = (await db.execute(select(Interface))).scalars().all(); links = (await db.execute(select(Link))).scalars().all(); icons = (await db.execute(select(IconAsset))).scalars().all(); rules = (await db.execute(select(NotificationRule))).scalars().all(); settings = (await db.execute(select(SystemSetting))).scalars().all(); positions = (await db.execute(select(TopologyPosition))).scalars().all(); snapshots = (await db.execute(select(TopologySnapshot))).scalars().all(); redundancy = (await db.execute(select(RedundancyGroup))).scalars().all()
     def clean(obj, excluded=()):
         return {c.name: getattr(obj, c.name) for c in obj.__table__.columns if c.name not in excluded}
     return {"format": "netmonitor-config", "version": 1, "exported_at": datetime.now(timezone.utc),
@@ -351,6 +393,7 @@ async def export_configuration(db: AsyncSession = Depends(get_db)):
         "interfaces": [clean(x) for x in interfaces], "links": [clean(x) for x in links],
         "redundancy_groups": [clean(x) for x in redundancy], "notification_rules": [clean(x) for x in rules],
         "settings": [clean(x) for x in settings], "topology_positions": [clean(x) for x in positions],
+        "topology_snapshots": [clean(x) for x in snapshots],
         "credentials_included": False}
 
 
@@ -442,5 +485,14 @@ async def import_configuration(payload: dict, db: AsyncSession = Depends(get_db)
             for key, value in values.items(): setattr(existing, key, value)
         else: db.add(TopologyPosition(**values))
     counts["topology_positions"] = len(payload.get("topology_positions", []))
+    for raw in payload.get("topology_snapshots", []):
+        existing = (await db.execute(select(TopologySnapshot).where(TopologySnapshot.name == raw.get("name")))).scalar_one_or_none()
+        remapped_positions = [{**position, "device_id": device_map.get(position.get("device_id"))}
+            for position in raw.get("positions", []) if device_map.get(position.get("device_id"))]
+        values = fields(TopologySnapshot, raw); values["positions"] = remapped_positions
+        if existing:
+            for key, value in values.items(): setattr(existing, key, value)
+        else: db.add(TopologySnapshot(**values))
+    counts["topology_snapshots"] = len(payload.get("topology_snapshots", []))
     await _audit(db, "IMPORT", "CONFIGURATION", None, f"Configuration imported: {counts}")
     return {"status": "imported", "counts": counts, "credentials_restored": False}

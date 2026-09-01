@@ -52,6 +52,15 @@ def test_read_only_data_source(client):
     assert unsafe.status_code == 422
 
 
+def test_database_default_ports(client):
+    mysql = client.post("/api/platform/databases", json={
+        "name": "MySQL defaults", "database_type": "MYSQL", "host": "db.internal",
+        "database_name": "network_monitor",
+    })
+    assert mysql.status_code == 201
+    assert mysql.json()["port"] == 3306
+
+
 def test_topology_and_backup_round_trip(client):
     gateway = client.post("/api/devices", json={"name": "Gateway test", "device_type": "ROUTER", "location": "Lab"})
     child = client.post("/api/devices", json={"name": "Child test", "device_type": "SWITCH", "location": "Lab", "gateway_device_id": gateway.json()["id"]})
@@ -61,12 +70,24 @@ def test_topology_and_backup_round_trip(client):
         {"device_id": child.json()["id"], "x": 25, "y": 240},
     ]})
     assert layout.status_code == 200
+    snapshot = client.post("/api/platform/topology-layout/snapshots", json={
+        "name": "Layout seguro", "layout_mode": "free",
+        "positions": [{"device_id": gateway.json()["id"], "x": 25, "y": 40},
+                      {"device_id": child.json()["id"], "x": 25, "y": 240}],
+        "viewport": {"x": 10, "y": 20, "zoom": 0.8},
+    })
+    assert snapshot.status_code == 201
+    client.put("/api/platform/topology-layout", json={"layout_mode": "free", "positions": []})
+    restored_view = client.post(f"/api/platform/topology-layout/snapshots/{snapshot.json()['id']}/restore")
+    assert restored_view.status_code == 200
+    assert len(restored_view.json()["positions"]) == 2
     backup = client.get("/api/platform/configuration/export")
     assert backup.status_code == 200
     assert backup.json()["credentials_included"] is False
     restored = client.post("/api/platform/configuration/import", json=backup.json())
     assert restored.status_code == 200
     assert restored.json()["counts"]["links"] >= 1
+    assert restored.json()["counts"]["topology_snapshots"] == 1
 
 
 def test_primary_database_migration(client):

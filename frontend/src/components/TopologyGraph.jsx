@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { LayoutGrid, Move } from 'lucide-react';
+import { LayoutGrid, Maximize2, Minimize2, Move, RotateCcw, Save, Trash2 } from 'lucide-react';
 import ReactFlow, {
   BaseEdge,
   EdgeLabelRenderer,
@@ -229,8 +229,12 @@ export default function TopologyGraph({ graphData }) {
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [layoutMode, setLayoutMode] = useState('auto');
   const [persistedPositions, setPersistedPositions] = useState(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [snapshots, setSnapshots] = useState([]);
+  const [selectedSnapshotId, setSelectedSnapshotId] = useState('');
   const lastStructureRef = useRef('');
   const flowInstanceRef = useRef(null);
+  const containerRef = useRef(null);
 
   const rawNodes = graphData?.nodes || [];
   const rawEdges = graphData?.edges || [];
@@ -247,7 +251,66 @@ export default function TopologyGraph({ graphData }) {
       setLayoutMode(data.layout_mode || 'auto');
       setPersistedPositions(Object.fromEntries((data.positions || []).map(item => [`device_${item.device_id}`, { x:item.x, y:item.y }])));
     }).catch(() => setPersistedPositions({}));
+    api.get('/platform/topology-layout/snapshots').then(({ data }) => setSnapshots(data)).catch(() => setSnapshots([]));
   }, []);
+
+  const reloadSnapshots = () => api.get('/platform/topology-layout/snapshots').then(({ data }) => setSnapshots(data));
+
+  const saveSnapshot = async () => {
+    const suggested = `Vista ${new Date().toLocaleString()}`;
+    const name = window.prompt('Nome da vista/layout:', suggested)?.trim();
+    if (!name) return;
+    const positions = nodes.map(node => ({ device_id:Number(node.id.replace('device_', '')), x:node.position.x, y:node.position.y })).filter(item => Number.isInteger(item.device_id));
+    try {
+      const response = await api.post('/platform/topology-layout/snapshots', {
+        name, layout_mode:layoutMode, positions, viewport:flowInstanceRef.current?.getViewport?.() || {},
+      });
+      await reloadSnapshots(); setSelectedSnapshotId(String(response.data.id));
+    } catch (error) { console.error('Unable to save topology view', error); }
+  };
+
+  const restoreSnapshot = async () => {
+    if (!selectedSnapshotId) return;
+    try {
+      const { data } = await api.post(`/platform/topology-layout/snapshots/${selectedSnapshotId}/restore`);
+      const restored = Object.fromEntries(data.positions.map(item => [`device_${item.device_id}`, { x:item.x, y:item.y }]));
+      setPersistedPositions(restored); setLayoutMode(data.layout_mode || 'free');
+      setNodes(current => current.map(node => ({ ...node, position:restored[node.id] || node.position })));
+      if (data.viewport && Number.isFinite(data.viewport.zoom)) {
+        setTimeout(() => flowInstanceRef.current?.setViewport(data.viewport, { duration:350 }), 30);
+      } else {
+        setTimeout(() => flowInstanceRef.current?.fitView({ padding:0.2, duration:350 }), 30);
+      }
+    } catch (error) { console.error('Unable to restore topology view', error); }
+  };
+
+  const deleteSnapshot = async () => {
+    if (!selectedSnapshotId || !window.confirm('Eliminar esta vista guardada?')) return;
+    try { await api.delete(`/platform/topology-layout/snapshots/${selectedSnapshotId}`); setSelectedSnapshotId(''); await reloadSnapshots(); }
+    catch (error) { console.error('Unable to delete topology view', error); }
+  };
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const active = document.fullscreenElement === containerRef.current;
+      setIsFullscreen(active);
+      setTimeout(() => flowInstanceRef.current?.fitView({ padding: 0.15, duration: 250 }), 80);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
+  const toggleFullscreen = async () => {
+    try {
+      if (document.fullscreenElement === containerRef.current) {
+        await document.exitFullscreen();
+      } else if (containerRef.current?.requestFullscreen) {
+        await containerRef.current.requestFullscreen();
+      }
+    } catch (error) {
+      console.error('Unable to change topology fullscreen mode', error);
+    }
+  };
 
   useEffect(() => {
     const autoNodes = layoutTopology(rawNodes, rawEdges);
@@ -314,7 +377,7 @@ export default function TopologyGraph({ graphData }) {
 
   if (rawNodes.length === 0) {
     return (
-      <div className="glass-card" style={{ width: '100%', height: '500px', borderRadius: '12px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', color: 'var(--text-muted)' }}>
+      <div className="glass-card" style={{ width: '100%', height: 'clamp(620px, calc(100vh - 210px), 860px)', borderRadius: '12px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', color: 'var(--text-muted)' }}>
         <p style={{ fontSize: '1rem', fontWeight: 500, marginBottom: '8px' }}>Nenhum equipamento cadastrado na topologia</p>
         <p style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>Cadastre equipamentos e links na barra lateral para visualizar a topologia em tempo real.</p>
       </div>
@@ -322,8 +385,15 @@ export default function TopologyGraph({ graphData }) {
   }
 
   return (
-    <div className="glass-card" style={{ width: '100%', height: '500px', borderRadius: '12px', overflow: 'hidden', position: 'relative' }}>
-      <div style={{ position: 'absolute', top: '12px', right: '12px', zIndex: 10, display: 'flex', gap: '6px', padding: '5px', borderRadius: '9px', background: 'rgba(15, 23, 42, 0.94)', border: '1px solid var(--border-color)', boxShadow: '0 6px 18px rgba(0,0,0,.28)' }}>
+    <div ref={containerRef} className="glass-card topology-canvas" style={{ width: '100%', height: isFullscreen ? '100vh' : 'clamp(620px, calc(100vh - 210px), 860px)', borderRadius: isFullscreen ? 0 : '12px', overflow: 'hidden', position: 'relative', background: '#111827' }}>
+      <div style={{ position: 'absolute', top: '12px', right: '12px', left: '12px', zIndex: 10, display: 'flex', justifyContent:'flex-end', flexWrap:'wrap', gap: '6px', padding: '5px', borderRadius: '9px', background: 'rgba(15, 23, 42, 0.94)', border: '1px solid var(--border-color)', boxShadow: '0 6px 18px rgba(0,0,0,.28)' }}>
+        <select className="form-select" value={selectedSnapshotId} onChange={event => setSelectedSnapshotId(event.target.value)} style={{ width:'190px', padding:'5px 8px', fontSize:'0.72rem' }} title="Vistas guardadas">
+          <option value="">Vistas guardadas…</option>
+          {snapshots.map(snapshot => <option key={snapshot.id} value={snapshot.id}>{snapshot.name}</option>)}
+        </select>
+        <button type="button" className="btn btn-secondary" onClick={saveSnapshot} style={{ padding:'6px 9px', fontSize:'0.72rem' }} title="Guardar as posições e o zoom atuais"><Save size={14}/> Guardar vista</button>
+        <button type="button" className="btn btn-secondary" disabled={!selectedSnapshotId} onClick={restoreSnapshot} style={{ padding:'6px 9px', fontSize:'0.72rem' }} title="Recuperar a vista selecionada"><RotateCcw size={14}/> Recuperar</button>
+        <button type="button" className="btn btn-danger" disabled={!selectedSnapshotId} onClick={deleteSnapshot} style={{ padding:'6px 8px', fontSize:'0.72rem' }} title="Eliminar a vista selecionada"><Trash2 size={14}/></button>
         <button type="button" className={`btn ${layoutMode === 'auto' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => changeLayoutMode('auto')} style={{ padding: '6px 9px', fontSize: '0.72rem' }} title="Organização hierárquica automática">
           <LayoutGrid size={14} /> Automático
         </button>
@@ -332,6 +402,10 @@ export default function TopologyGraph({ graphData }) {
         </button>
         <button type="button" className="btn btn-secondary" onClick={reorganize} style={{ padding: '6px 9px', fontSize: '0.72rem' }} title="Recalcular a organização da topologia">
           Reorganizar
+        </button>
+        <button type="button" className="btn btn-secondary" onClick={toggleFullscreen} style={{ padding: '6px 9px', fontSize: '0.72rem' }} title={isFullscreen ? 'Sair da tela cheia' : 'Abrir topologia em tela cheia'}>
+          {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+          {isFullscreen ? 'Sair' : 'Tela cheia'}
         </button>
       </div>
       <ReactFlowProvider>

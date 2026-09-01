@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class IconRead(BaseModel):
@@ -34,6 +34,16 @@ class DatabaseConnectionInput(BaseModel):
         if value not in {"SQLITE", "POSTGRESQL", "MYSQL", "MSSQL", "ORACLE"}:
             raise ValueError("Unsupported database type")
         return value
+
+    @model_validator(mode="after")
+    def apply_default_port(self):
+        defaults = {"POSTGRESQL": 5432, "MYSQL": 3306, "MSSQL": 1433, "ORACLE": 1521}
+        if self.database_type == "SQLITE":
+            self.host = None
+            self.port = None
+        elif self.port is None:
+            self.port = defaults[self.database_type]
+        return self
 
 
 class DatabaseConnectionRead(BaseModel):
@@ -139,6 +149,11 @@ class PositionInput(BaseModel):
 class TopologyLayoutInput(BaseModel):
     layout_mode: str = "free"
     positions: list[PositionInput]
+
+
+class TopologySnapshotInput(TopologyLayoutInput):
+    name: str = Field(min_length=1, max_length=128)
+    viewport: dict[str, float] = Field(default_factory=dict)
 
 
 class SystemSettingsInput(BaseModel):

@@ -34,6 +34,7 @@ São persistidos:
 - gateways e enlaces automáticos/manuais;
 - grupos de redundância;
 - layout da topologia;
+- vistas nomeadas da topologia, incluindo posições e viewport;
 - ícones nativos e personalizados;
 - conexões de banco e fontes SQL;
 - integrações e regras de notificação;
