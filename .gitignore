@@ -54,6 +54,8 @@ pnpm-debug.log*
 *.log
 logs/
 data/
+.active-database
+**/.active-database
 
 # IDEs and editors
 .idea/

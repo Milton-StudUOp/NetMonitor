@@ -1,144 +1,133 @@
-# NetMonitor Free
+# NetMonitor Premium
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+Plataforma de monitoramento de infraestrutura de rede com descoberta automática, topologia persistente, análise de redundância, alertas multicanal e banco de dados selecionável pelo administrador.
 
-Plataforma gratuita e open source para monitoramento de equipamentos, enlaces e redundância de rede em tempo real.
+> A branch `main` representa a edição gratuita. O desenvolvimento avançado está na branch `premium`.
 
-## Recursos
+## Funcionalidades
 
-- Monitoramento ICMP de equipamentos e enlaces.
-- Topologia interativa com layout automático e livre.
-- Associação automática entre equipamento, gateway e enlace principal.
+- Monitoramento ICMP, TCP, HTTP/HTTPS e SNMP.
+- Descoberta por IP, intervalo ou CIDR, com SNMPv2c e SNMPv3.
+- Identificação de hostname, descrição SNMP, fabricante, modelo e interfaces.
+- Importação seletiva dos equipamentos descobertos.
+- Gateway associado e criação automática do enlace principal.
+- Topologia automática ou livre, com posições persistidas no backend.
+- Biblioteca de ícones nativos e upload de SVG/PNG sanitizado.
 - Redundância por enlaces ou diretamente por equipamentos.
-- Detecção de estados normal, degradado e crítico.
-- Alertas com diagnóstico de causa provável.
-- Histórico, relatórios, WebSocket e dashboard em tempo real.
-- Verificações ICMP, TCP, HTTP, HTTPS e SNMP.
-- Notificações opcionais por e-mail, Microsoft Teams e Telegram.
-- Backend FastAPI e frontend React/Vite.
+- Estados normal, degradado e crítico com diagnóstico de dependências.
+- Email SMTP, Telegram e WhatsApp por API oficial/provider.
+- Regras, deduplicação, lembretes e notificações de recuperação.
+- SQLite padrão e promoção de SQLite, PostgreSQL, MySQL, SQL Server ou Oracle a banco principal.
+- Migração validada antes da troca do banco principal.
+- Fontes SQL externas somente leitura, limitadas a 100 registros.
+- Backup e restauração de inventário, topologia, redundância, regras e preferências.
+- Criptografia de passwords e tokens e trilha de auditoria.
 
-## Requisitos
+## Início rápido local
 
-### Com Docker
-
-- Docker Engine 24+
-- Docker Compose v2
-
-### Desenvolvimento local
-
-- Python 3.12+
-- Node.js 20+
-- npm 10+
-
-O desenvolvimento local usa SQLite por padrão. PostgreSQL/TimescaleDB e Redis são usados no ambiente Docker.
-
-## Execução com Docker
-
-```bash
-git clone https://github.com/Milton-StudUOp/NetMonitor.git
-cd NetMonitor
-cp .env.example .env
-docker compose up -d --build
-```
-
-Edite `.env` e troque, no mínimo, `POSTGRES_PASSWORD` e `SECRET_KEY` antes de subir os contêineres.
-
-Serviços:
-
-- Dashboard: <http://localhost:3000>
-- API: <http://localhost:8000>
-- Swagger: <http://localhost:8000/docs>
-- WebSocket: `ws://localhost:8000/ws/monitoring`
-
-## Desenvolvimento local
-
-### Backend
-
-```bash
-cd backend
-python -m venv venv
-```
-
-Ativação no Windows:
+Requisitos: Python 3.12+, Node.js 20+ e npm 10+.
 
 ```powershell
+git clone https://github.com/Milton-StudUOp/NetMonitor.git
+cd NetMonitor
+git switch premium
+
+cd backend
+python -m venv venv
 .\venv\Scripts\Activate.ps1
-```
-
-Ativação no Linux/macOS:
-
-```bash
-source venv/bin/activate
-```
-
-Depois:
-
-```bash
 pip install -r requirements.txt
-cp .env.example .env
+Copy-Item .env.example .env
 uvicorn app.main:app --reload --port 8080
 ```
 
-No PowerShell, use `Copy-Item .env.example .env` no lugar de `cp` se necessário.
-
-### Frontend
-
 Em outro terminal:
 
-```bash
+```powershell
 cd frontend
 npm ci
 npm run dev
 ```
 
-Acesse <http://localhost:3000>. O Vite encaminha API e WebSocket para o backend local na porta `8080`.
+Acesse:
 
-## Validação antes do commit
+- Interface: <http://localhost:3000>
+- API: <http://localhost:8080>
+- Swagger: <http://localhost:8080/docs>
+- Health check: <http://localhost:8080/health>
+
+## Docker
 
 ```bash
-cd backend
-python -m compileall app
-python -c "from sqlalchemy.orm import configure_mappers; import app.models; configure_mappers()"
+cp .env.example .env
+docker compose up -d --build
+```
 
-cd ../frontend
-npm ci
+Troque `POSTGRES_PASSWORD` e `SECRET_KEY` antes de iniciar. No Docker, PostgreSQL é o banco principal inicial e os volumes `pgdata` e `redisdata` garantem persistência.
+
+## Banco principal
+
+Sem configuração adicional, o desenvolvimento local usa `backend/network_monitor.db` (SQLite). A tela **Configurações → Bases de dados** permite cadastrar outra conexão e escolher **Usar como principal**.
+
+O processo de promoção:
+
+1. testa o destino;
+2. exige banco vazio;
+3. cria o esquema;
+4. migra todos os registros em transação;
+5. valida contagens por tabela;
+6. grava a seleção em arquivo local criptografado;
+7. solicita reinício do backend.
+
+O banco anterior não é apagado. Consulte [Migração de banco](docs/DATABASES.md).
+
+## Descoberta de rede
+
+Em **Descoberta**, informe um dos formatos:
+
+```text
+192.168.1.15
+192.168.1.10-192.168.1.100
+192.168.1.0/24
+```
+
+O limite é de 1.024 hosts por pesquisa e 64 portas por alvo. Credenciais usadas na descoberta não são persistidas. Execute varreduras apenas em redes autorizadas.
+
+## Topologia e ícones
+
+- **Automático** recalcula a hierarquia.
+- **Livre** permite arrastar os equipamentos e persiste as coordenadas no banco.
+- **Reorganizar** recalcula e grava uma nova disposição.
+- O ícone é escolhido em **Equipamentos → Editar → Ícone do equipamento**.
+- Ícones próprios são carregados em **Configurações → Ícones**.
+
+## Backup
+
+Em **Configurações → Sistema & Backup**:
+
+- **Exportar configuração** gera JSON versionado.
+- **Importar backup** restaura ícones, equipamentos, interfaces, links, redundâncias, posições, regras e preferências.
+
+Passwords, tokens e comunidades SNMP nunca são exportados.
+
+## Testes
+
+```powershell
+cd backend
+.\venv\Scripts\python.exe -m pytest -q
+.\venv\Scripts\python.exe -m compileall app
+
+cd ..\frontend
 npm run build
 ```
 
-O mesmo fluxo é executado automaticamente pelo GitHub Actions.
+## Documentação
 
-## Estrutura
-
-```text
-.
-├── backend/                 API FastAPI, modelos e monitoramento
-│   ├── alembic/             Estrutura de migrações
-│   └── app/
-│       ├── api/             Endpoints REST e WebSocket
-│       ├── models/          Modelos SQLAlchemy
-│       ├── schemas/         Contratos Pydantic
-│       ├── services/        ICMP, SNMP, redundância e alertas
-│       └── utils/
-├── frontend/                Interface React/Vite
-│   └── src/
-│       ├── components/
-│       ├── hooks/
-│       └── pages/
-├── docker-compose.yml
-├── improvement.md            Notas e especificações de evolução
-└── .github/workflows/ci.yml
-```
-
-## Segurança e privacidade
-
-Não publique inventários reais, bancos SQLite, arquivos `.env`, comunidades SNMP privadas, tokens, webhooks ou credenciais. Consulte [SECURITY.md](SECURITY.md).
-
-O monitoramento ICMP/SNMP deve ser executado somente em redes e equipamentos para os quais você possui autorização.
-
-## Contribuição
-
-Contribuições são bem-vindas. Leia [CONTRIBUTING.md](CONTRIBUTING.md) antes de abrir um pull request.
+- [Arquitetura e persistência](docs/ARCHITECTURE.md)
+- [Bancos e migração](docs/DATABASES.md)
+- [Segurança](SECURITY.md)
+- [Contribuição](CONTRIBUTING.md)
+- [Estado da especificação premium](improvement.md)
 
 ## Licença
 
-Distribuído gratuitamente sob a [licença MIT](LICENSE).
+A edição gratuita publicada na branch `main` é distribuída sob a [licença MIT](LICENSE). Confirme os termos aplicáveis à branch premium antes de redistribuí-la.

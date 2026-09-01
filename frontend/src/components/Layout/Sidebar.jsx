@@ -10,6 +10,8 @@ import {
   History,
   FileText,
   Activity,
+  Radar,
+  Settings,
 } from 'lucide-react';
 
 export default function Sidebar() {
@@ -22,6 +24,8 @@ export default function Sidebar() {
     { to: '/links', label: 'Links', icon: Network },
     { to: '/history', label: 'Histórico', icon: History },
     { to: '/reports', label: 'Relatórios', icon: FileText },
+    { to: '/discovery', label: 'Descoberta', icon: Radar },
+    { to: '/settings', label: 'Configurações', icon: Settings },
   ];
 
   return (

@@ -1,26 +1,40 @@
 # Contribuindo
 
-Obrigado por contribuir com o Network Monitor.
+## Fluxo
 
-## Fluxo recomendado
+1. Crie uma branch a partir de `premium` para funcionalidades premium ou de `main` para a edição gratuita.
+2. Não inclua credenciais, `.env`, `.active-database`, bancos, logs ou dados reais.
+3. Preserve compatibilidade entre SQLite e PostgreSQL sempre que alterar modelos.
+4. Adicione validação Pydantic, tratamento controlado de erros e audit log para operações administrativas.
+5. Atualize a documentação afetada.
 
-1. Crie um fork e uma branch a partir de `main`.
-2. Não inclua `.env`, credenciais, bancos locais, logs ou dados reais de rede.
-3. Mantenha alterações pequenas e documente decisões relevantes.
-4. Execute as validações antes de abrir o pull request:
+## Validação obrigatória
 
-```bash
+```powershell
 cd backend
-python -m compileall app
+.\venv\Scripts\python.exe -m pytest -q
+.\venv\Scripts\python.exe -m compileall app
+.\venv\Scripts\python.exe -c "from sqlalchemy.orm import configure_mappers; import app.models; configure_mappers()"
 
-cd ../frontend
+cd ..\frontend
 npm ci
 npm run build
 ```
 
-5. Descreva no pull request o problema, a solução e como ela foi testada.
+## Banco e migrações
+
+Novas tabelas são criadas por `Base.metadata.create_all`. Alterações em tabelas existentes devem ser adicionadas a `schema_migrations.py` e testadas sobre uma base já existente. Mudanças no processo de promoção precisam testar:
+
+- destino vazio;
+- relações entre devices, interfaces e links;
+- contagem por tabela;
+- ausência de URL ou password em respostas e logs;
+- preservação do banco de origem.
+
+## Pull request
+
+Descreva problema, solução, riscos, migração necessária e comandos executados. Para alterações visuais, inclua capturas sem endereços ou nomes reais.
 
 ## Segurança
 
-Não abra issues públicas contendo senhas, tokens, comunidades SNMP privadas,
-endereços sensíveis ou dados de produção. Consulte [SECURITY.md](SECURITY.md).
+Vulnerabilidades não devem ser discutidas publicamente antes de correção coordenada. Consulte [SECURITY.md](SECURITY.md).

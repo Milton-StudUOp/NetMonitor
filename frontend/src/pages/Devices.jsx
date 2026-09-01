@@ -4,10 +4,12 @@ import api from '../api/client';
 import Modal from '../components/Modal';
 import ConfirmModal from '../components/ConfirmModal';
 import { getApiErrorMessage } from '../utils/errors';
+import DeviceIcon from '../components/DeviceIcon';
 
 export default function Devices() {
   const [devices, setDevices] = useState([]);
   const [links, setLinks] = useState([]);
+  const [icons, setIcons] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState('ALL');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -28,6 +30,9 @@ export default function Devices() {
     manufacturer: '',
     model: '',
     function: '',
+    group_name: '',
+    icon_id: '',
+    monitoring_method: 'ICMP',
     is_critical: true,
     monitoring_interval: 30,
   };
@@ -55,6 +60,7 @@ export default function Devices() {
   useEffect(() => {
     fetchDevices();
     fetchLinks();
+    api.get('/platform/icons').then((res) => setIcons(res.data)).catch(() => {});
   }, []);
 
   const handleOpenAdd = () => {
@@ -77,6 +83,9 @@ export default function Devices() {
       manufacturer: dev.manufacturer || '',
       model: dev.model || '',
       function: dev.function || '',
+      group_name: dev.group_name || '',
+      icon_id: dev.icon_id || '',
+      monitoring_method: dev.monitoring_method || 'ICMP',
       is_critical: dev.is_critical ?? true,
       monitoring_interval: dev.monitoring_interval || 30,
     });
@@ -90,6 +99,7 @@ export default function Devices() {
       ...deviceFields,
       gateway_ip_address: formData.gateway_ip_address || null,
       gateway_device_id: formData.gateway_device_id ? Number(formData.gateway_device_id) : null,
+      icon_id: formData.icon_id ? Number(formData.icon_id) : null,
       ...(editingId && {
         primary_link_id: primary_link_id ? Number(primary_link_id) : null,
       }),
@@ -233,7 +243,7 @@ export default function Devices() {
               {filteredDevices.map((d) => (
                 <tr key={d.id}>
                   <td>
-                    <div style={{ fontWeight: 600, color: '#fff', fontSize: '0.92rem' }}>{d.name}</div>
+                    <div style={{ display:'flex', alignItems:'center', gap:'8px', fontWeight: 600, color: '#fff', fontSize: '0.92rem' }}><DeviceIcon icon={icons.find(i => i.id === d.icon_id)} size={18} />{d.name}</div>
                     {d.model && <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>{d.manufacturer} {d.model}</div>}
                   </td>
                   <td>
@@ -357,6 +367,19 @@ export default function Devices() {
                   <option value="SERVER">Servidor / Host</option>
                   <option value="OTHER">Outro Dispositivo</option>
                 </select>
+              </div>
+            </div>
+            <div className="form-row">
+              <div className="form-group">
+                <label className="form-label">Ícone do equipamento</label>
+                <select className="form-select" value={formData.icon_id} onChange={(e) => setFormData({ ...formData, icon_id: e.target.value })}>
+                  <option value="">Automático pelo tipo</option>
+                  {icons.map((icon) => <option key={icon.id} value={icon.id}>{icon.category} — {icon.name}</option>)}
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Grupo</label>
+                <input className="form-input" value={formData.group_name} onChange={(e) => setFormData({ ...formData, group_name: e.target.value })} placeholder="Ex: DMZ, Core, Filial Norte" />
               </div>
             </div>
           </div>

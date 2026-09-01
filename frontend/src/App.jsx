@@ -13,6 +13,8 @@ import Devices from './pages/Devices';
 import Links from './pages/Links';
 import History from './pages/History';
 import Reports from './pages/Reports';
+import Discovery from './pages/Discovery';
+import PlatformSettings from './pages/PlatformSettings';
 
 export default function App() {
   const { isConnected } = useWebSocket((event) => {
@@ -36,6 +38,8 @@ export default function App() {
                 <Route path="/links" element={<Links />} />
                 <Route path="/history" element={<History />} />
                 <Route path="/reports" element={<Reports />} />
+                <Route path="/discovery" element={<Discovery />} />
+                <Route path="/settings" element={<PlatformSettings />} />
               </Routes>
             </ErrorBoundary>
           </div>

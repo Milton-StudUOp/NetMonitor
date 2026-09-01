@@ -13,29 +13,12 @@ import ReactFlow, {
   useNodesState,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
+import api from '../api/client';
+import DeviceIcon from './DeviceIcon';
 
 const NODE_WIDTH = 190;
 const HORIZONTAL_GAP = 110;
 const VERTICAL_GAP = 190;
-const POSITION_STORAGE_KEY = 'netmonitor.topology.positions.v1';
-
-function readSavedPositions() {
-  try {
-    return JSON.parse(localStorage.getItem(POSITION_STORAGE_KEY) || '{}');
-  } catch {
-    return {};
-  }
-}
-
-function savePositions(nodes) {
-  try {
-    const positions = Object.fromEntries(nodes.map((node) => [node.id, node.position]));
-    localStorage.setItem(POSITION_STORAGE_KEY, JSON.stringify(positions));
-  } catch {
-    // Local storage may be unavailable in privacy-restricted browsers.
-  }
-}
-
 function prepareEdges(edges) {
   return edges.map((edge) => ({
     ...edge,
@@ -214,7 +197,7 @@ const CustomDeviceNode = ({ data = {} }) => {
     }}>
       <Handle id="top" type="target" position={Position.Top} style={{ background: border }} />
       <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-        {data.device_type || 'EQUIPAMENTO'}
+        <span style={{display:'inline-flex',alignItems:'center',gap:'6px'}}><DeviceIcon size={15} color={border} icon={{lucide_name:data.icon_name,custom_data:data.icon_custom_data,mime_type:data.icon_mime_type}} />{data.device_type || 'EQUIPAMENTO'}</span>
       </div>
       <div style={{ fontSize: '0.95rem', fontWeight: 700, margin: '4px 0' }}>
         {data.label || 'Equipamento'}
@@ -244,7 +227,8 @@ export default function TopologyGraph({ graphData }) {
   const edgeTypes = useMemo(() => ({ topologyEdge: TopologyEdge }), []);
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-  const [layoutMode, setLayoutMode] = useState(() => localStorage.getItem('netmonitor.topology.layoutMode') || 'auto');
+  const [layoutMode, setLayoutMode] = useState('auto');
+  const [persistedPositions, setPersistedPositions] = useState(null);
   const lastStructureRef = useRef('');
   const flowInstanceRef = useRef(null);
 
@@ -259,9 +243,16 @@ export default function TopologyGraph({ graphData }) {
   );
 
   useEffect(() => {
+    api.get('/platform/topology-layout').then(({ data }) => {
+      setLayoutMode(data.layout_mode || 'auto');
+      setPersistedPositions(Object.fromEntries((data.positions || []).map(item => [`device_${item.device_id}`, { x:item.x, y:item.y }])));
+    }).catch(() => setPersistedPositions({}));
+  }, []);
+
+  useEffect(() => {
     const autoNodes = layoutTopology(rawNodes, rawEdges);
     const autoPositionById = new Map(autoNodes.map((node) => [node.id, node.position]));
-    const savedPositions = readSavedPositions();
+    const savedPositions = persistedPositions ?? {};
     const structureChanged = lastStructureRef.current !== structureSignature;
 
     setNodes((currentNodes) => {
@@ -280,22 +271,35 @@ export default function TopologyGraph({ graphData }) {
     });
     setEdges(prepareEdges(rawEdges));
     lastStructureRef.current = structureSignature;
-  }, [graphData, structureSignature, layoutMode, setNodes, setEdges]);
+  }, [graphData, structureSignature, layoutMode, persistedPositions, setNodes, setEdges]);
+
+  const persistLayout = (mode, currentNodes) => {
+    const positions = currentNodes.map(node => ({ device_id:Number(node.id.replace('device_', '')), x:node.position.x, y:node.position.y })).filter(x => Number.isInteger(x.device_id));
+    // Keep the in-memory persisted snapshot synchronized immediately. Without
+    // this, the 5-second topology refresh could reapply the stale snapshot
+    // loaded when the component was mounted and visually undo a user drag.
+    setPersistedPositions(Object.fromEntries(
+      positions.map(item => [`device_${item.device_id}`, { x: item.x, y: item.y }]),
+    ));
+    api.put('/platform/topology-layout', { layout_mode:mode, positions }).catch(error => console.error('Unable to persist topology layout', error));
+  };
 
   const changeLayoutMode = (mode) => {
     setLayoutMode(mode);
-    localStorage.setItem('netmonitor.topology.layoutMode', mode);
     if (mode === 'auto') {
       const arranged = layoutTopology(rawNodes, rawEdges);
       setNodes(arranged);
+      persistLayout(mode, arranged);
       setTimeout(() => flowInstanceRef.current?.fitView({ padding: 0.2, duration: 350 }), 0);
+    } else {
+      persistLayout(mode, nodes);
     }
   };
 
   const reorganize = () => {
     const arranged = layoutTopology(rawNodes, rawEdges);
     setNodes(arranged);
-    if (layoutMode === 'free') savePositions(arranged);
+    persistLayout(layoutMode, arranged);
     setTimeout(() => flowInstanceRef.current?.fitView({ padding: 0.2, duration: 350 }), 0);
   };
 
@@ -303,7 +307,7 @@ export default function TopologyGraph({ graphData }) {
     if (layoutMode !== 'free') return;
     setNodes((currentNodes) => {
       const updated = currentNodes.map((item) => item.id === node.id ? { ...item, position: node.position } : item);
-      savePositions(updated);
+      persistLayout('free', updated);
       return updated;
     });
   };
