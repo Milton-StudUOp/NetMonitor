@@ -14,10 +14,10 @@ export default function LatencyChart({ data = [] }) {
     return (
       <div className="glass-card" style={{ padding: '20px', minHeight: '260px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
         <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#fff', marginBottom: '8px' }}>
-          Latência e Desempenho do Enlace (ms)
+          Link Latency and Performance (ms)
         </h3>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-          Nenhum dado de latência registrado até o momento.
+          No latency data recorded yet.
         </p>
       </div>
     );
@@ -28,7 +28,7 @@ export default function LatencyChart({ data = [] }) {
   return (
     <div className="glass-card" style={{ padding: '20px' }}>
       <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#fff', marginBottom: '16px' }}>
-        Latência e Desempenho do Enlace (ms)
+        Link Latency and Performance (ms)
       </h3>
       <div style={{ width: '100%', height: 260 }}>
         <ResponsiveContainer width="100%" height="100%">

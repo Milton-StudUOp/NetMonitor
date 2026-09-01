@@ -121,12 +121,12 @@ const TopologyEdge = ({
   const isUnknown = status === 'UNKNOWN';
   const isRedundancy = Boolean(data.is_redundancy);
   const text = isDown
-    ? (isRedundancy ? 'Redundância crítica' : 'Enlace indisponível')
+    ? (isRedundancy ? 'Critical redundancy' : 'Link unavailable')
     : status === 'DEGRADED'
-      ? (isRedundancy ? 'Redundância degradada' : 'Enlace degradado')
+      ? (isRedundancy ? 'Degraded redundancy' : 'Degraded link')
       : hasWarning
-        ? 'Redes distintas'
-        : 'Estado desconhecido';
+        ? 'Different networks'
+        : 'Unknown status';
   const accentColor = isDown ? '#f87171' : isUnknown ? '#94a3b8' : '#fbbf24';
   const borderColor = isDown ? '#ef444480' : isUnknown ? '#64748b80' : '#f59e0b80';
   const backgroundColor = isDown ? '#450a0af2' : isUnknown ? '#1e293bf2' : '#422006f2';
@@ -197,10 +197,10 @@ const CustomDeviceNode = ({ data = {} }) => {
     }}>
       <Handle id="top" type="target" position={Position.Top} style={{ background: border }} />
       <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-        <span style={{display:'inline-flex',alignItems:'center',gap:'6px'}}><DeviceIcon size={15} color={border} icon={{lucide_name:data.icon_name,custom_data:data.icon_custom_data,mime_type:data.icon_mime_type}} />{data.device_type || 'EQUIPAMENTO'}</span>
+        <span style={{display:'inline-flex',alignItems:'center',gap:'6px'}}><DeviceIcon size={15} color={border} icon={{lucide_name:data.icon_name,custom_data:data.icon_custom_data,mime_type:data.icon_mime_type}} />{data.device_type || 'DEVICE'}</span>
       </div>
       <div style={{ fontSize: '0.95rem', fontWeight: 700, margin: '4px 0' }}>
-        {data.label || 'Equipamento'}
+        {data.label || 'Device'}
       </div>
       <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
         {data.ip_address || 'Sem IP'}
@@ -264,8 +264,8 @@ export default function TopologyGraph({ graphData }) {
   });
 
   const createSnapshot = async () => {
-    const suggested = `Vista ${new Date().toLocaleString()}`;
-    const name = window.prompt('Nome da vista/layout:', suggested)?.trim();
+    const suggested = `View ${new Date().toLocaleString('en-GB')}`;
+    const name = window.prompt('View/layout name:', suggested)?.trim();
     if (!name) return;
     try {
       const response = await api.post('/platform/topology-layout/snapshots', snapshotPayload(name));
@@ -299,7 +299,7 @@ export default function TopologyGraph({ graphData }) {
   };
 
   const deleteSnapshot = async () => {
-    if (!selectedSnapshotId || !window.confirm('Eliminar esta vista guardada?')) return;
+    if (!selectedSnapshotId || !window.confirm('Delete this saved view?')) return;
     try { await api.delete(`/platform/topology-layout/snapshots/${selectedSnapshotId}`); setSelectedSnapshotId(''); await reloadSnapshots(); }
     catch (error) { console.error('Unable to delete topology view', error); }
   };
@@ -392,8 +392,8 @@ export default function TopologyGraph({ graphData }) {
   if (rawNodes.length === 0) {
     return (
       <div className="glass-card" style={{ width: '100%', height: 'clamp(620px, calc(100vh - 210px), 860px)', borderRadius: '12px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', color: 'var(--text-muted)' }}>
-        <p style={{ fontSize: '1rem', fontWeight: 500, marginBottom: '8px' }}>Nenhum equipamento cadastrado na topologia</p>
-        <p style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>Cadastre equipamentos e links na barra lateral para visualizar a topologia em tempo real.</p>
+        <p style={{ fontSize: '1rem', fontWeight: 500, marginBottom: '8px' }}>No devices registered in the topology</p>
+        <p style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>Register devices and links from the sidebar to view the topology in real time.</p>
       </div>
     );
   }
@@ -401,26 +401,26 @@ export default function TopologyGraph({ graphData }) {
   return (
     <div ref={containerRef} className="glass-card topology-canvas" style={{ width: '100%', height: isFullscreen ? '100vh' : 'clamp(620px, calc(100vh - 210px), 860px)', borderRadius: isFullscreen ? 0 : '12px', overflow: 'hidden', position: 'relative', background: '#111827' }}>
       <div style={{ position: 'absolute', top: '12px', right: '12px', left: '12px', zIndex: 10, display: 'flex', justifyContent:'flex-end', flexWrap:'wrap', gap: '6px', padding: '5px', borderRadius: '9px', background: 'rgba(15, 23, 42, 0.94)', border: '1px solid var(--border-color)', boxShadow: '0 6px 18px rgba(0,0,0,.28)' }}>
-        <select className="form-select" value={selectedSnapshotId} onChange={event => setSelectedSnapshotId(event.target.value)} style={{ width:'190px', padding:'5px 8px', fontSize:'0.72rem' }} title="Vistas guardadas">
-          <option value="">Vistas guardadas…</option>
+        <select className="form-select" value={selectedSnapshotId} onChange={event => setSelectedSnapshotId(event.target.value)} style={{ width:'190px', padding:'5px 8px', fontSize:'0.72rem' }} title="Saved views">
+          <option value="">Saved views…</option>
           {snapshots.map(snapshot => <option key={snapshot.id} value={snapshot.id}>{snapshot.name}</option>)}
         </select>
-        <button type="button" className="btn btn-secondary" onClick={saveSnapshot} style={{ padding:'6px 9px', fontSize:'0.72rem' }} title={selectedSnapshotId ? 'Atualizar a vista selecionada' : 'Guardar uma nova vista'}><Save size={14}/> {selectedSnapshotId ? 'Salvar' : 'Guardar vista'}</button>
-        <button type="button" className="btn btn-secondary" onClick={createSnapshot} style={{ padding:'6px 9px', fontSize:'0.72rem' }} title="Guardar o layout atual como uma nova vista">+ Nova vista</button>
-        <button type="button" className="btn btn-secondary" disabled={!selectedSnapshotId} onClick={restoreSnapshot} style={{ padding:'6px 9px', fontSize:'0.72rem' }} title="Recuperar a vista selecionada"><RotateCcw size={14}/> Recuperar</button>
-        <button type="button" className="btn btn-danger" disabled={!selectedSnapshotId} onClick={deleteSnapshot} style={{ padding:'6px 8px', fontSize:'0.72rem' }} title="Eliminar a vista selecionada"><Trash2 size={14}/></button>
-        <button type="button" className={`btn ${layoutMode === 'auto' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => changeLayoutMode('auto')} style={{ padding: '6px 9px', fontSize: '0.72rem' }} title="Organização hierárquica automática">
-          <LayoutGrid size={14} /> Automático
+        <button type="button" className="btn btn-secondary" onClick={saveSnapshot} style={{ padding:'6px 9px', fontSize:'0.72rem' }} title={selectedSnapshotId ? 'Update selected view' : 'Save a new view'}><Save size={14}/> {selectedSnapshotId ? 'Save' : 'Save View'}</button>
+        <button type="button" className="btn btn-secondary" onClick={createSnapshot} style={{ padding:'6px 9px', fontSize:'0.72rem' }} title="Save the current layout as a new view">+ New View</button>
+        <button type="button" className="btn btn-secondary" disabled={!selectedSnapshotId} onClick={restoreSnapshot} style={{ padding:'6px 9px', fontSize:'0.72rem' }} title="Restore the selected view"><RotateCcw size={14}/> Restore</button>
+        <button type="button" className="btn btn-danger" disabled={!selectedSnapshotId} onClick={deleteSnapshot} style={{ padding:'6px 8px', fontSize:'0.72rem' }} title="Delete the selected view"><Trash2 size={14}/></button>
+        <button type="button" className={`btn ${layoutMode === 'auto' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => changeLayoutMode('auto')} style={{ padding: '6px 9px', fontSize: '0.72rem' }} title="Automatic hierarchical layout">
+          <LayoutGrid size={14} /> Automatic
         </button>
-        <button type="button" className={`btn ${layoutMode === 'free' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => changeLayoutMode('free')} style={{ padding: '6px 9px', fontSize: '0.72rem' }} title="Permite arrastar e guardar posições">
-          <Move size={14} /> Livre
+        <button type="button" className={`btn ${layoutMode === 'free' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => changeLayoutMode('free')} style={{ padding: '6px 9px', fontSize: '0.72rem' }} title="Allows dragging and saving positions">
+          <Move size={14} /> Free
         </button>
-        <button type="button" className="btn btn-secondary" onClick={reorganize} style={{ padding: '6px 9px', fontSize: '0.72rem' }} title="Recalcular a organização da topologia">
-          Reorganizar
+        <button type="button" className="btn btn-secondary" onClick={reorganize} style={{ padding: '6px 9px', fontSize: '0.72rem' }} title="Recalculate topology layout">
+          Reorganize
         </button>
-        <button type="button" className="btn btn-secondary" onClick={toggleFullscreen} style={{ padding: '6px 9px', fontSize: '0.72rem' }} title={isFullscreen ? 'Sair da tela cheia' : 'Abrir topologia em tela cheia'}>
+        <button type="button" className="btn btn-secondary" onClick={toggleFullscreen} style={{ padding: '6px 9px', fontSize: '0.72rem' }} title={isFullscreen ? 'Exit fullscreen' : 'Open topology in fullscreen'}>
           {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-          {isFullscreen ? 'Sair' : 'Tela cheia'}
+          {isFullscreen ? 'Exit' : 'Fullscreen'}
         </button>
       </div>
       <ReactFlowProvider>

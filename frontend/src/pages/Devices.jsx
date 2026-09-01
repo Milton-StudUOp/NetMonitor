@@ -113,7 +113,7 @@ export default function Devices() {
       setIsModalOpen(false);
       await Promise.all([fetchDevices(), fetchLinks()]);
     } catch (err) {
-      alert('Erro ao salvar equipamento: ' + getApiErrorMessage(err));
+      alert('Error saving device: ' + getApiErrorMessage(err));
     }
   };
 
@@ -123,7 +123,7 @@ export default function Devices() {
       await api.delete(`/devices/${deleteTarget.id}`);
       fetchDevices();
     } catch (err) {
-      alert('Erro ao excluir equipamento: ' + getApiErrorMessage(err));
+      alert('Error deleting device: ' + getApiErrorMessage(err));
     } finally {
       setDeleteTarget(null);
     }
@@ -167,15 +167,15 @@ export default function Devices() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
         <div>
           <h2 style={{ fontSize: '1.35rem', color: '#fff', fontWeight: 700, letterSpacing: '-0.01em' }}>
-            Gerenciamento de Equipamentos de Rede
+            Network Device Management
           </h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginTop: '2px' }}>
-            Cadastre switches, media converters, roteadores e rádiosEnlaces monitorados em tempo real.
+            Register switches, media converters, routers, and radio links monitored in real time.
           </p>
         </div>
 
         <button className="btn btn-primary" onClick={handleOpenAdd} style={{ padding: '10px 20px', fontSize: '0.9rem' }}>
-          <Plus size={18} /> Adicionar Equipamento
+          <Plus size={18} /> Add Device
         </button>
       </div>
 
@@ -187,25 +187,25 @@ export default function Devices() {
             type="text"
             className="form-input"
             style={{ width: '100%', border: 'none', background: 'transparent', padding: 0 }}
-            placeholder="Buscar por nome, IP ou localização..."
+            placeholder="Search by name, IP, or location..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Tipo:</span>
+          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Type:</span>
           <select
             className="form-select"
             style={{ padding: '6px 12px', fontSize: '0.85rem' }}
             value={typeFilter}
             onChange={(e) => setTypeFilter(e.target.value)}
           >
-            <option value="ALL">Todos os Tipos</option>
+            <option value="ALL">All Types</option>
             <option value="SWITCH">Switch</option>
             <option value="MEDIA_CONVERTER">Media Converter</option>
             <option value="ROUTER">Roteador</option>
-            <option value="RADIO">Rádio Enlace</option>
+            <option value="RADIO">Radio Link</option>
             <option value="FIREWALL">Firewall</option>
             <option value="SERVER">Servidor</option>
             <option value="OTHER">Outro</option>
@@ -218,25 +218,25 @@ export default function Devices() {
         {filteredDevices.length === 0 ? (
           <div style={{ padding: '48px 24px', textAlign: 'center', color: 'var(--text-muted)' }}>
             <Server size={44} style={{ marginBottom: '16px', opacity: 0.4 }} />
-            <h4 style={{ color: '#fff', fontSize: '1rem', marginBottom: '6px' }}>Nenhum equipamento encontrado</h4>
+            <h4 style={{ color: '#fff', fontSize: '1rem', marginBottom: '6px' }}>No devices found</h4>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-dim)', maxWidth: '400px', margin: '0 auto' }}>
               {devices.length === 0
-                ? 'Comece clicando no botão "+ Adicionar Equipamento" acima para cadastrar seu primeiro switch ou radio.'
-                : 'Nenhum equipamento corresponde aos filtros aplicados.'}
+                ? 'Start by clicking the "+ Add Device" button above to register your first switch or radio.'
+                : 'No devices match the applied filters.'}
             </p>
           </div>
         ) : (
           <table className="custom-table">
             <thead>
               <tr>
-                <th>Equipamento</th>
-                <th>Tipo</th>
-                <th>Endereço IP</th>
-                <th>Localização</th>
+                <th>Device</th>
+                <th>Type</th>
+                <th>IP Address</th>
+                <th>Location</th>
                 <th>Gateway / Link</th>
                 <th>Status</th>
-                <th>Diagnóstico ICMP</th>
-                <th style={{ textAlign: 'right' }}>Ações</th>
+                <th>ICMP Diagnostics</th>
+                <th style={{ textAlign: 'right' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -266,10 +266,10 @@ export default function Devices() {
                       {d.gateway_ip_address || '—'}
                     </div>
                     <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
-                      {devices.find(dev => dev.id === d.gateway_device_id)?.name || 'Gateway não associado'}
+                      {devices.find(dev => dev.id === d.gateway_device_id)?.name || 'Gateway not assigned'}
                     </div>
                     <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
-                      {links.find(link => link.id === d.primary_link_id)?.name || 'Link principal não associado'}
+                      {links.find(link => link.id === d.primary_link_id)?.name || 'Primary link not assigned'}
                     </div>
                   </td>
                   <td>
@@ -289,10 +289,10 @@ export default function Devices() {
                         pingResult[d.id].is_up ? (
                           <span style={{ color: '#10b981' }}>{pingResult[d.id].latency}</span>
                         ) : (
-                          <span style={{ color: '#ef4444' }}>Sem Resposta</span>
+                          <span style={{ color: '#ef4444' }}>No Response</span>
                         )
                       ) : (
-                        'Testar Ping'
+                        'Test Ping'
                       )}
                     </button>
                   </td>
@@ -302,17 +302,17 @@ export default function Devices() {
                         className="btn btn-secondary"
                         style={{ padding: '5px 10px', fontSize: '0.75rem' }}
                         onClick={() => handleOpenEdit(d)}
-                        title="Editar Equipamento"
+                        title="Edit Device"
                       >
-                        <Edit3 size={14} /> Editar
+                        <Edit3 size={14} /> Edit
                       </button>
                       <button
                         className="btn btn-danger"
                         style={{ padding: '5px 10px', fontSize: '0.75rem' }}
                         onClick={() => setDeleteTarget({ id: d.id, name: d.name })}
-                        title="Excluir Equipamento"
+                        title="Delete Device"
                       >
-                        <Trash2 size={14} /> Excluir
+                        <Trash2 size={14} /> Delete
                       </button>
                     </div>
                   </td>
@@ -327,8 +327,8 @@ export default function Devices() {
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        title={editingId ? 'Editar Equipamento de Rede' : 'Cadastrar Novo Equipamento'}
-        subtitle="Preencha as informações técnicas do equipamento para integração no monitoramento"
+        title={editingId ? 'Edit Network Device' : 'Register New Device'}
+        subtitle="Enter the device's technical information for monitoring integration"
         icon={Server}
         maxWidth="720px"
       >
@@ -336,12 +336,12 @@ export default function Devices() {
           {/* Section 1: Identification */}
           <div style={{ marginBottom: '20px' }}>
             <h4 style={{ fontSize: '0.85rem', fontWeight: 600, color: '#3b82f6', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '12px' }}>
-              1. Identificação Básica
+              1. Basic Identification
             </h4>
 
             <div className="form-row">
               <div className="form-group">
-                <label className="form-label">Nome do Equipamento *</label>
+                <label className="form-label">Device Name *</label>
                 <input
                   className="form-input"
                   type="text"
@@ -353,16 +353,16 @@ export default function Devices() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Tipo de Equipamento *</label>
+                <label className="form-label">Device Type *</label>
                 <select
                   className="form-select"
                   value={formData.device_type}
                   onChange={(e) => setFormData({ ...formData, device_type: e.target.value })}
                 >
-                  <option value="SWITCH">Switch de Camada 2/3</option>
-                  <option value="MEDIA_CONVERTER">Media Converter (Conversor óptico)</option>
+                  <option value="SWITCH">Layer 2/3 Switch</option>
+                  <option value="MEDIA_CONVERTER">Media Converter (Optical converter)</option>
                   <option value="ROUTER">Roteador Core/Borda</option>
-                  <option value="RADIO">Rádio Enlace (Microwaves)</option>
+                  <option value="RADIO">Radio Link (Microwaves)</option>
                   <option value="FIREWALL">Firewall / Security Appliance</option>
                   <option value="SERVER">Servidor / Host</option>
                   <option value="OTHER">Outro Dispositivo</option>
@@ -371,14 +371,14 @@ export default function Devices() {
             </div>
             <div className="form-row">
               <div className="form-group">
-                <label className="form-label">Ícone do equipamento</label>
+                <label className="form-label">Device icon</label>
                 <select className="form-select" value={formData.icon_id} onChange={(e) => setFormData({ ...formData, icon_id: e.target.value })}>
-                  <option value="">Automático pelo tipo</option>
+                  <option value="">Automatic by type</option>
                   {icons.map((icon) => <option key={icon.id} value={icon.id}>{icon.category} — {icon.name}</option>)}
                 </select>
               </div>
               <div className="form-group">
-                <label className="form-label">Grupo</label>
+                <label className="form-label">Group</label>
                 <input className="form-input" value={formData.group_name} onChange={(e) => setFormData({ ...formData, group_name: e.target.value })} placeholder="Ex: DMZ, Core, Filial Norte" />
               </div>
             </div>
@@ -387,12 +387,12 @@ export default function Devices() {
           {/* Section 2: Network & Location */}
           <div style={{ marginBottom: '20px' }}>
             <h4 style={{ fontSize: '0.85rem', fontWeight: 600, color: '#3b82f6', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '12px' }}>
-              2. Endereçamento e Localização
+              2. Addressing and Location
             </h4>
 
             <div className="form-row">
               <div className="form-group">
-                <label className="form-label">Endereço IP (Gerenciamento)</label>
+                <label className="form-label">IP Address (Management)</label>
                 <input
                   className="form-input"
                   type="text"
@@ -403,7 +403,7 @@ export default function Devices() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Sub-rede (CIDR)</label>
+                <label className="form-label">Subnet (CIDR)</label>
                 <input
                   className="form-input"
                   type="text"
@@ -427,13 +427,13 @@ export default function Devices() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Equipamento Gateway</label>
+                <label className="form-label">Gateway Device</label>
                 <select
                   className="form-select"
                   value={formData.gateway_device_id}
                   onChange={(e) => setFormData({ ...formData, gateway_device_id: e.target.value })}
                 >
-                  <option value="">Não associado</option>
+                  <option value="">Not assigned</option>
                   {devices
                     .filter((d) => d.id !== editingId)
                     .map((d) => (
@@ -446,14 +446,14 @@ export default function Devices() {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Link Principal</label>
+              <label className="form-label">Primary Link</label>
               <select
                 className="form-select"
                 value={formData.primary_link_id}
                 disabled={!editingId}
                 onChange={(e) => setFormData({ ...formData, primary_link_id: e.target.value })}
               >
-                <option value="">{editingId ? 'Não associado' : 'Disponível após cadastrar o equipamento'}</option>
+                <option value="">{editingId ? 'Not assigned' : 'Available after registering the device'}</option>
                 {links
                   .filter((l) => editingId && (l.source_device_id === editingId || l.destination_device_id === editingId))
                   .map((l) => (
@@ -465,7 +465,7 @@ export default function Devices() {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Localização Física / Rack</label>
+              <label className="form-label">Physical Location / Rack</label>
               <input
                 className="form-input"
                 type="text"
@@ -479,12 +479,12 @@ export default function Devices() {
           {/* Section 3: Hardware Details */}
           <div style={{ marginBottom: '24px' }}>
             <h4 style={{ fontSize: '0.85rem', fontWeight: 600, color: '#3b82f6', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '12px' }}>
-              3. Detalhes do Hardware & Monitoramento
+              3. Hardware & Monitoring Details
             </h4>
 
             <div className="form-row">
               <div className="form-group">
-                <label className="form-label">Fabricante</label>
+                <label className="form-label">Manufacturer</label>
                 <input
                   className="form-input"
                   type="text"
@@ -495,7 +495,7 @@ export default function Devices() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Modelo</label>
+                <label className="form-label">Model</label>
                 <input
                   className="form-input"
                   type="text"
@@ -507,11 +507,11 @@ export default function Devices() {
             </div>
 
             <div className="form-group">
-              <label className="form-label">Função / Observações</label>
+              <label className="form-label">Role / Notes</label>
               <input
                 className="form-input"
                 type="text"
-                placeholder="Ex: Concentrador dos enlaces de fibra do trecho norte"
+                placeholder="E.g.: Fiber-link concentrator for the northern segment"
                 value={formData.function}
                 onChange={(e) => setFormData({ ...formData, function: e.target.value })}
               />
@@ -521,10 +521,10 @@ export default function Devices() {
           {/* Buttons Footer */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '12px', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
             <button type="button" className="btn btn-secondary" onClick={() => setIsModalOpen(false)}>
-              Cancelar
+              Cancel
             </button>
             <button type="submit" className="btn btn-primary">
-              {editingId ? 'Atualizar Equipamento' : 'Cadastrar Equipamento'}
+              {editingId ? 'Update Device' : 'Register Device'}
             </button>
           </div>
         </form>
@@ -535,10 +535,10 @@ export default function Devices() {
         isOpen={Boolean(deleteTarget)}
         onClose={() => setDeleteTarget(null)}
         onConfirm={executeDelete}
-        title="Excluir Equipamento"
+        title="Delete Device"
         message={
           deleteTarget
-            ? `Tem certeza que deseja apagar o equipamento "${deleteTarget.name}"? Esta ação removerá também os links, histórico e redundâncias associados.`
+            ? `Are you sure you want to delete the device "${deleteTarget.name}"? This will also remove its associated links, history, and redundancy settings.`
             : ''
         }
       />

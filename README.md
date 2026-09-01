@@ -1,31 +1,31 @@
 # NetMonitor Premium
 
-Plataforma de monitoramento de infraestrutura de rede com descoberta automática, topologia persistente, análise de redundância, alertas multicanal e banco de dados selecionável pelo administrador.
+Network infrastructure monitoring platform with automatic discovery, persistent topology, redundancy analysis, multi-channel alerts, and an administrator-selectable database.
 
-> A branch `main` representa a edição gratuita. O desenvolvimento avançado está na branch `premium`.
+> The `main` branch represents the free edition. Advanced development is available on the `premium` branch.
 
-## Funcionalidades
+## Features
 
-- Monitoramento ICMP, TCP, HTTP/HTTPS e SNMP.
-- Descoberta por IP, intervalo ou CIDR, com SNMPv2c e SNMPv3.
-- Identificação de hostname, descrição SNMP, fabricante, modelo e interfaces.
-- Importação seletiva dos equipamentos descobertos.
-- Gateway associado e criação automática do enlace principal.
-- Topologia automática ou livre, com posições persistidas no backend.
-- Biblioteca de ícones nativos e upload de SVG/PNG sanitizado.
-- Redundância por enlaces ou diretamente por equipamentos.
-- Estados normal, degradado e crítico com diagnóstico de dependências.
-- Email SMTP, Telegram e WhatsApp por API oficial/provider.
-- Regras, deduplicação, lembretes e notificações de recuperação.
-- SQLite padrão e promoção de SQLite, PostgreSQL, MySQL, SQL Server ou Oracle a banco principal.
-- Migração validada antes da troca do banco principal.
-- Fontes SQL externas somente leitura, limitadas a 100 registros.
-- Backup e restauração de inventário, topologia, redundância, regras e preferências.
-- Criptografia de passwords e tokens e trilha de auditoria.
+- ICMP, TCP, HTTP/HTTPS, and SNMP monitoring.
+- Discovery by IP address, range, or CIDR using SNMPv2c and SNMPv3.
+- Hostname, SNMP description, manufacturer, model, and interface identification.
+- Selective import of discovered devices.
+- Associated gateway and automatic primary-link creation.
+- Automatic or free-form topology with positions persisted in the backend.
+- Built-in icon library and sanitized SVG/PNG uploads.
+- Redundancy through links or directly between devices.
+- Normal, degraded, and critical states with dependency diagnostics.
+- SMTP email, Telegram, and WhatsApp through an official API/provider.
+- Rules, deduplication, reminders, and recovery notifications.
+- SQLite by default, with SQLite, PostgreSQL, MySQL, SQL Server, or Oracle promotion to the primary database.
+- Validated migration before switching the primary database.
+- Read-only external SQL data sources limited to 100 records.
+- Inventory, topology, redundancy, rules, and preferences backup and restore.
+- Password and token encryption with an audit trail.
 
-## Início rápido local
+## Local quick start
 
-Requisitos: Python 3.12+, Node.js 20+ e npm 10+.
+Requirements: Python 3.12+, Node.js 20+, and npm 10+.
 
 ```powershell
 git clone https://github.com/Milton-StudUOp/NetMonitor.git
@@ -37,23 +37,23 @@ python -m venv venv
 .\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 Copy-Item .env.example .env
-uvicorn app.main:app --reload --port 8080
+uvicorn app.main:app --reload --host 0.0.0.0 --port 5555
 ```
 
-Em outro terminal:
+In another terminal:
 
 ```powershell
 cd frontend
 npm ci
-npm run dev
+npm run dev -- --host 0.0.0.0
 ```
 
-Acesse:
+Open:
 
 - Interface: <http://localhost:3000>
-- API: <http://localhost:8080>
-- Swagger: <http://localhost:8080/docs>
-- Health check: <http://localhost:8080/health>
+- API: <http://localhost:5555>
+- Swagger: <http://localhost:5555/docs>
+- Health check: <http://localhost:5555/health>
 
 ## Docker
 
@@ -62,27 +62,27 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-Troque `POSTGRES_PASSWORD` e `SECRET_KEY` antes de iniciar. No Docker, PostgreSQL é o banco principal inicial e os volumes `pgdata` e `redisdata` garantem persistência.
+Change `POSTGRES_PASSWORD` and `SECRET_KEY` before starting. With Docker, PostgreSQL is the initial primary database, and the `pgdata` and `redisdata` volumes provide persistence.
 
-## Banco principal
+## Primary database
 
-Sem configuração adicional, o desenvolvimento local usa `backend/network_monitor.db` (SQLite). A tela **Configurações → Bases de dados** permite cadastrar outra conexão e escolher **Usar como principal**.
+Without additional configuration, local development uses `backend/network_monitor.db` (SQLite). The **Settings → Databases** screen lets administrators register another connection and select **Use as Primary**.
 
-O processo de promoção:
+The promotion process:
 
-1. testa o destino;
-2. exige banco vazio;
-3. cria o esquema;
-4. migra todos os registros em transação;
-5. valida contagens por tabela;
-6. grava a seleção em arquivo local criptografado;
-7. solicita reinício do backend.
+1. Tests the destination.
+2. Requires an empty database.
+3. Creates the schema.
+4. Migrates all records in a transaction.
+5. Validates counts for each table.
+6. Stores the selection in an encrypted local file.
+7. Requests a backend restart.
 
-O banco anterior não é apagado. Se o banco promovido falhar no startup, o backend retorna automaticamente ao anterior. Consulte [Migração de banco](docs/DATABASES.md).
+The previous database is not deleted. If the promoted database fails during startup, the backend automatically returns to the previous one. See [Database migration](docs/DATABASES.md).
 
-## Descoberta de rede
+## Network discovery
 
-Em **Descoberta**, informe um dos formatos:
+In **Discovery**, enter one of the following formats:
 
 ```text
 192.168.1.15
@@ -90,28 +90,38 @@ Em **Descoberta**, informe um dos formatos:
 192.168.1.0/24
 ```
 
-O limite é de 1.024 hosts por pesquisa e 64 portas por alvo. Credenciais usadas na descoberta não são persistidas. Execute varreduras apenas em redes autorizadas.
+Each scan is limited to 1,024 hosts and 64 ports per target. Discovery credentials are not persisted. Run scans only on authorized networks.
 
-## Topologia e ícones
+## Topology and icons
 
-- **Automático** recalcula a hierarquia.
-- **Livre** permite arrastar os equipamentos e persiste as coordenadas no banco.
-- **Reorganizar** recalcula e grava uma nova disposição.
-- **Guardar vista** cria uma cópia nomeada das posições, modo, zoom e enquadramento atuais.
-- **Recuperar** restaura uma vista guardada caso a topologia seja desorganizada.
-- O ícone é escolhido em **Equipamentos → Editar → Ícone do equipamento**.
-- Ícones próprios são carregados em **Configurações → Ícones**.
+- **Automatic** recalculates the hierarchy.
+- **Free** allows devices to be dragged and persists their coordinates in the database.
+- **Reorganize** recalculates and stores a new arrangement.
+- **Save View** creates a named copy of the current positions, mode, zoom, and viewport.
+- **Restore** restores a saved view if the topology becomes disorganized.
+- Choose an icon under **Devices → Edit → Device icon**.
+- Upload custom icons under **Settings → Icons**.
 
 ## Backup
 
-Em **Configurações → Sistema & Backup**:
+Under **Settings → System & Backup**:
 
-- **Exportar configuração** gera JSON versionado.
-- **Importar backup** restaura ícones, equipamentos, interfaces, links, redundâncias, posições, regras e preferências.
+- **Export Configuration** generates versioned JSON.
+- **Import Backup** restores icons, devices, interfaces, links, redundancy, positions, rules, and preferences.
 
-Passwords, tokens e comunidades SNMP nunca são exportados.
+Passwords, tokens, and SNMP communities are never exported.
 
-## Testes
+## Notifications
+
+Configure channels under **Settings → Notifications**:
+
+- **SMTP Email** supports unauthenticated or authenticated SMTP, STARTTLS, and implicit TLS. Do not enable STARTTLS and implicit TLS at the same time.
+- **Telegram** requires a BotFather token and supports multiple destination Chat IDs, including groups and channels.
+- **WhatsApp API** requires an HTTP(S) provider endpoint and bearer token, and supports multiple recipient numbers. The endpoint must accept `sender`, `recipient`, and `message` JSON fields.
+
+Use **Save & Test** before enabling production rules. Rules can filter events by type, severity, and source text; select one or more channels; add rule-specific recipients; send reminders; and notify on recovery. Secrets are encrypted at rest and are never returned by the API.
+
+## Tests
 
 ```powershell
 cd backend
@@ -121,14 +131,15 @@ cd backend
 cd ..\frontend
 npm run build
 ```
-## Documentação
 
-- [Arquitetura e persistência](docs/ARCHITECTURE.md)
-- [Bancos e migração](docs/DATABASES.md)
-- [Segurança](SECURITY.md)
-- [Contribuição](CONTRIBUTING.md)
-- [Estado da especificação premium](improvement.md)
+## Documentation
 
-## Licença
+- [Architecture and persistence](docs/ARCHITECTURE.md)
+- [Databases and migration](docs/DATABASES.md)
+- [Security](SECURITY.md)
+- [Contributing](CONTRIBUTING.md)
+- [Premium specification status](improvement.md)
 
-A edição gratuita publicada na branch `main` é distribuída sob a [licença MIT](LICENSE). Confirme os termos aplicáveis à branch premium antes de redistribuí-la.
+## License
+
+The free edition published on the `main` branch is distributed under the [MIT License](LICENSE). Confirm the terms applicable to the premium branch before redistributing it.

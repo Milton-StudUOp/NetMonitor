@@ -17,15 +17,15 @@ import {
 export default function Sidebar() {
   const navItems = [
     { to: '/', label: 'Dashboard', icon: LayoutDashboard },
-    { to: '/topology', label: 'Topologia', icon: GitBranch },
-    { to: '/redundancy', label: 'Redundância', icon: GitFork },
-    { to: '/alerts', label: 'Alertas', icon: AlertTriangle },
-    { to: '/devices', label: 'Equipamentos', icon: Server },
+    { to: '/topology', label: 'Topology', icon: GitBranch },
+    { to: '/redundancy', label: 'Redundancy', icon: GitFork },
+    { to: '/alerts', label: 'Alerts', icon: AlertTriangle },
+    { to: '/devices', label: 'Devices', icon: Server },
     { to: '/links', label: 'Links', icon: Network },
-    { to: '/history', label: 'Histórico', icon: History },
-    { to: '/reports', label: 'Relatórios', icon: FileText },
-    { to: '/discovery', label: 'Descoberta', icon: Radar },
-    { to: '/settings', label: 'Configurações', icon: Settings },
+    { to: '/history', label: 'History', icon: History },
+    { to: '/reports', label: 'Reports', icon: FileText },
+    { to: '/discovery', label: 'Discovery', icon: Radar },
+    { to: '/settings', label: 'Settings', icon: Settings },
   ];
 
   return (

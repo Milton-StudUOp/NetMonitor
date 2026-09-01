@@ -23,10 +23,10 @@ const statusColors = {
 };
 
 function formatDate(value) {
-  if (!value) return 'Aguardando primeira avaliação';
+  if (!value) return 'Waiting for first evaluation';
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'Data indisponível';
-  return date.toLocaleString('pt-PT', {
+  if (Number.isNaN(date.getTime())) return 'Date unavailable';
+  return date.toLocaleString('en-GB', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
@@ -65,22 +65,22 @@ function EndpointCard({ role, type, target }) {
           </div>
           {isDevice ? (
             <div style={{ display: 'grid', gap: '6px', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-              <div><span style={{ color: 'var(--text-dim)' }}>IP:</span> <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-main)' }}>{target.ip_address || 'Não configurado'}</span></div>
-              <div><span style={{ color: 'var(--text-dim)' }}>Rede:</span> <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-main)' }}>{target.network || 'Não informada'}</span></div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><MapPin size={12} /> {target.location || 'Localização não informada'}</div>
-              <div><span style={{ color: 'var(--text-dim)' }}>Tipo:</span> {target.device_type || 'OTHER'}</div>
+              <div><span style={{ color: 'var(--text-dim)' }}>IP:</span> <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-main)' }}>{target.ip_address || 'Not configured'}</span></div>
+              <div><span style={{ color: 'var(--text-dim)' }}>Network:</span> <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-main)' }}>{target.network || 'Not provided'}</span></div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}><MapPin size={12} /> {target.location || 'Location not provided'}</div>
+              <div><span style={{ color: 'var(--text-dim)' }}>Type:</span> {target.device_type || 'OTHER'}</div>
             </div>
           ) : (
             <div style={{ display: 'grid', gap: '6px', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-              <div><span style={{ color: 'var(--text-dim)' }}>Tecnologia:</span> {target.link_type || 'OTHER'}</div>
-              <div><span style={{ color: 'var(--text-dim)' }}>Prioridade:</span> {target.priority || 'N/A'}</div>
-              <div><span style={{ color: 'var(--text-dim)' }}>Pontas:</span> Equipamento #{target.source_device_id} → #{target.destination_device_id}</div>
-              <div><span style={{ color: 'var(--text-dim)' }}>Intervalo:</span> {target.monitoring_interval || 5}s</div>
+              <div><span style={{ color: 'var(--text-dim)' }}>Technology:</span> {target.link_type || 'OTHER'}</div>
+              <div><span style={{ color: 'var(--text-dim)' }}>Priority:</span> {target.priority || 'N/A'}</div>
+              <div><span style={{ color: 'var(--text-dim)' }}>Endpoints:</span> Device #{target.source_device_id} → #{target.destination_device_id}</div>
+              <div><span style={{ color: 'var(--text-dim)' }}>Interval:</span> {target.monitoring_interval || 5}s</div>
             </div>
           )}
         </>
       ) : (
-        <div style={{ color: '#f87171', fontSize: '0.82rem' }}>Unidade não encontrada ou removida.</div>
+        <div style={{ color: '#f87171', fontSize: '0.82rem' }}>Unit not found or removed.</div>
       )}
     </div>
   );
@@ -89,10 +89,10 @@ function EndpointCard({ role, type, target }) {
 function StatusMessage({ status, type }) {
   const isDevice = type === 'DEVICE';
   const messages = {
-    NORMAL: `As duas ${isDevice ? 'unidades' : 'rotas'} estão operacionais e a tolerância a falhas está preservada.`,
-    DEGRADED: `O serviço ainda possui uma ${isDevice ? 'unidade' : 'rota'} operacional, mas perdeu a tolerância a uma nova falha.`,
-    CRITICAL: `As duas ${isDevice ? 'unidades' : 'rotas'} estão indisponíveis. O serviço pode estar interrompido.`,
-    UNKNOWN: 'O grupo ainda não possui dados suficientes para determinar a disponibilidade.',
+    NORMAL: `Both ${isDevice ? 'units' : 'paths'} are operational and fault tolerance is preserved.`,
+    DEGRADED: `The service still has one operational ${isDevice ? 'unit' : 'path'}, but can no longer tolerate another failure.`,
+    CRITICAL: `Both ${isDevice ? 'units' : 'paths'} are unavailable. The service may be interrupted.`,
+    UNKNOWN: 'The group does not yet have enough data to determine availability.',
   };
   const color = statusColors[status] || statusColors.UNKNOWN;
   const Icon = status === 'NORMAL' ? ShieldCheck : status === 'CRITICAL' ? ShieldX : AlertTriangle;
@@ -121,7 +121,7 @@ export default function RedundancyPanel({ group }) {
             <div style={{ display: 'flex', alignItems: 'center', gap: '9px', flexWrap: 'wrap' }}>
               <h3 style={{ fontSize: '1rem', fontWeight: 700, color: '#fff' }}>{group.name}</h3>
               <span style={{ padding: '3px 8px', borderRadius: '999px', background: 'rgba(59,130,246,.12)', border: '1px solid rgba(59,130,246,.3)', color: '#60a5fa', fontSize: '0.65rem', fontWeight: 700 }}>
-                {type === 'DEVICE' ? 'EQUIPAMENTOS' : 'ENLACES'}
+                {type === 'DEVICE' ? 'DEVICES' : 'LINKS'}
               </span>
             </div>
             {group.description && <p style={{ marginTop: '3px', fontSize: '0.78rem', color: 'var(--text-muted)' }}>{group.description}</p>}
@@ -131,18 +131,18 @@ export default function RedundancyPanel({ group }) {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px' }}>
-        <EndpointCard role="Unidade Primária" type={type} target={primary} />
-        <EndpointCard role="Unidade Secundária" type={type} target={secondary} />
+        <EndpointCard role="Primary Unit" type={type} target={primary} />
+        <EndpointCard role="Secondary Unit" type={type} target={secondary} />
       </div>
 
       <div style={{ marginTop: '13px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', color: 'var(--text-dim)', fontSize: '0.74rem' }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <Activity size={13} /> Verificação: {group.service_check_type || 'NONE'}
+          <Activity size={13} /> Check: {group.service_check_type || 'NONE'}
           {group.service_check_target ? ` · ${group.service_check_target}` : ''}
           {group.service_check_port ? `:${group.service_check_port}` : ''}
         </span>
         <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }} title={group.last_evaluated || ''}>
-          <Clock3 size={13} /> Última avaliação: {formatDate(group.last_evaluated)}
+          <Clock3 size={13} /> Last evaluation: {formatDate(group.last_evaluated)}
         </span>
       </div>
 

@@ -1,14 +1,14 @@
-# Contribuindo
+# Contributing
 
-## Fluxo
+## Workflow
 
-1. Crie uma branch a partir de `premium` para funcionalidades premium ou de `main` para a edição gratuita.
-2. Não inclua credenciais, `.env`, `.active-database`, bancos, logs ou dados reais.
-3. Preserve compatibilidade entre SQLite e PostgreSQL sempre que alterar modelos.
-4. Adicione validação Pydantic, tratamento controlado de erros e audit log para operações administrativas.
-5. Atualize a documentação afetada.
+1. Create a branch from `premium` for premium features or from `main` for the free edition.
+2. Do not include credentials, `.env`, `.active-database`, databases, logs, or real data.
+3. Preserve SQLite and PostgreSQL compatibility when changing models.
+4. Add Pydantic validation, controlled error handling, and audit logging for administrative operations.
+5. Update all affected documentation.
 
-## Validação obrigatória
+## Required validation
 
 ```powershell
 cd backend
@@ -21,20 +21,20 @@ npm ci
 npm run build
 ```
 
-## Banco e migrações
+## Databases and migrations
 
-Novas tabelas são criadas por `Base.metadata.create_all`. Alterações em tabelas existentes devem ser adicionadas a `schema_migrations.py` e testadas sobre uma base já existente. Mudanças no processo de promoção precisam testar:
+New tables are created by `Base.metadata.create_all`. Changes to existing tables must be added to `schema_migrations.py` and tested against an existing database. Changes to the promotion process must test:
 
-- destino vazio;
-- relações entre devices, interfaces e links;
-- contagem por tabela;
-- ausência de URL ou password em respostas e logs;
-- preservação do banco de origem.
+- An empty destination.
+- Relationships among devices, interfaces, and links.
+- Counts for each table.
+- Absence of URLs or passwords in responses and logs.
+- Preservation of the source database.
 
-## Pull request
+## Pull requests
 
-Descreva problema, solução, riscos, migração necessária e comandos executados. Para alterações visuais, inclua capturas sem endereços ou nomes reais.
+Describe the problem, solution, risks, required migration, and commands executed. For visual changes, include screenshots without real addresses or names.
 
-## Segurança
+## Security
 
-Vulnerabilidades não devem ser discutidas publicamente antes de correção coordenada. Consulte [SECURITY.md](SECURITY.md).
+Do not discuss vulnerabilities publicly before a coordinated fix. See [SECURITY.md](SECURITY.md).

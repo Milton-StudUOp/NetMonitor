@@ -1,41 +1,41 @@
-# Política de segurança
+# Security Policy
 
-## Segredos
+## Secrets
 
-Passwords de bancos e SMTP, tokens de Telegram/WhatsApp e demais credenciais persistidas são protegidos com Fernet usando uma chave derivada de `SECRET_KEY`.
+Database and SMTP passwords, Telegram/WhatsApp tokens, and other persisted credentials are protected with Fernet using a key derived from `SECRET_KEY`.
 
-- Use uma `SECRET_KEY` longa, aleatória e estável.
-- Alterar a chave invalida os segredos já criptografados.
-- Nunca publique `.env`, `.active-database`, bancos locais, certificados ou inventários reais.
-- APIs retornam apenas indicadores como `password_configured` e `secrets_configured`.
-- Backups não incluem passwords, tokens nem comunidades SNMP.
+- Use a long, random, and stable `SECRET_KEY`.
+- Changing the key invalidates previously encrypted secrets.
+- Never publish `.env`, `.active-database`, local databases, certificates, or real inventories.
+- APIs return only indicators such as `password_configured` and `secrets_configured`.
+- Backups exclude passwords, tokens, and SNMP communities.
 
-Exemplo de geração de chave:
+Generate a key with:
 
 ```powershell
 python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
-## Descoberta e monitoramento
+## Discovery and monitoring
 
-Use ICMP, TCP e SNMP somente em redes para as quais exista autorização. Restrinja o acesso administrativo ao NetMonitor e publique a interface atrás de HTTPS e autenticação antes de expô-la fora de uma rede confiável.
+Use ICMP, TCP, and SNMP only on networks where you have authorization. Restrict administrative access to NetMonitor and place the interface behind HTTPS and authentication before exposing it outside a trusted network.
 
-## SVG personalizado
+## Custom SVG files
 
-Uploads aceitam SVG e PNG até 512 KB. SVG contendo `script`, URI `javascript:` ou declaração de entidade é rejeitado. Recomenda-se revisar visualmente ativos personalizados antes do uso.
+Uploads accept SVG and PNG files up to 512 KB. SVG files containing `script`, a `javascript:` URI, or an entity declaration are rejected. Visually review custom assets before use.
 
-## SQL e bancos
+## SQL and databases
 
-- Fontes de dados aceitam uma única instrução iniciada por `SELECT`.
-- Resultados são limitados a 100 linhas.
-- Use utilizadores de banco com privilégio mínimo.
-- A promoção a banco principal exige destino vazio e validação por tabela.
-- O SQL Server também exige Microsoft ODBC Driver 18 instalado no sistema operacional.
+- Data sources accept one statement beginning with `SELECT`.
+- Results are limited to 100 rows.
+- Use least-privilege database users.
+- Primary database promotion requires an empty destination and per-table validation.
+- SQL Server also requires Microsoft ODBC Driver 18 on the operating system.
 
-## Comunicação externa
+## External communication
 
-Telegram e WhatsApp enviam dados ao provider configurado. Não inclua dados sensíveis desnecessários nas mensagens. Para WhatsApp, use somente API oficial ou provider contratualmente autorizado; automação de WhatsApp Web não é suportada.
+Telegram and WhatsApp send data to the configured provider. Do not include unnecessary sensitive data in messages. For WhatsApp, use only an official API or a contractually authorized provider; WhatsApp Web automation is not supported.
 
-## Relato de vulnerabilidades
+## Reporting vulnerabilities
 
-Não publique detalhes exploráveis numa issue. Utilize Security Advisories privados do GitHub ou o canal privado definido pelo mantenedor. Inclua versão, impacto, passos mínimos de reprodução e proposta de mitigação.
+Do not publish exploitable details in an issue. Use private GitHub Security Advisories or the private channel defined by the maintainer. Include the version, impact, minimal reproduction steps, and a proposed mitigation.

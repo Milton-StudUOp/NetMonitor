@@ -26,10 +26,10 @@ export default function Reports() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
         <div>
           <h2 style={{ fontSize: '1.25rem', color: '#fff', fontWeight: 600 }}>
-            Relatórios e Indicadores SLA / MTTR / MTBF
+            Reports and Metrics SLA / MTTR / MTBF
           </h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-            Análise consolidada de disponibilidade da infraestrutura e perdas de redundância.
+            Consolidated analysis of infrastructure availability and redundancy losses.
           </p>
         </div>
 
@@ -41,7 +41,7 @@ export default function Reports() {
               className={`btn ${period === p ? 'btn-primary' : 'btn-secondary'}`}
               style={{ textTransform: 'capitalize' }}
             >
-              {p === 'daily' ? 'Diário' : p === 'weekly' ? 'Semanal' : 'Mensal'}
+              {p === 'daily' ? 'Daily' : p === 'weekly' ? 'Weekly' : 'Monthly'}
             </button>
           ))}
         </div>
@@ -49,27 +49,27 @@ export default function Reports() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px', marginBottom: '24px' }}>
         <div className="glass-card" style={{ padding: '20px' }}>
-          <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Disponibilidade Geral (SLA)</span>
+          <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Overall Availability (SLA)</span>
           <div style={{ fontSize: '2.5rem', fontWeight: 700, color: '#10b981', margin: '8px 0' }}>
             {metrics?.availability_pct ?? 100}%
           </div>
-          <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>Baseado no histórico de sondagens ICMP/SNMP</span>
+          <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>Based on probe history ICMP/SNMP</span>
         </div>
 
         <div className="glass-card" style={{ padding: '20px' }}>
-          <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Tempo Médio de Reparo (MTTR)</span>
+          <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Mean Time to Repair (MTTR)</span>
           <div style={{ fontSize: '2.5rem', fontWeight: 700, color: '#3b82f6', margin: '8px 0' }}>
             {metrics?.mttr_minutes ?? 0} <span style={{ fontSize: '1rem' }}>min</span>
           </div>
-          <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>Média até a resolução de incidentes</span>
+          <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>Average time to incident resolution</span>
         </div>
 
         <div className="glass-card" style={{ padding: '20px' }}>
-          <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Perdas de Redundância</span>
+          <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Redundancy Losses</span>
           <div style={{ fontSize: '2.5rem', fontWeight: 700, color: '#f59e0b', margin: '8px 0' }}>
             {metrics?.redundancy_loss_events ?? 0}
           </div>
-          <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>Ocorrências em que a redundância evitou a queda</span>
+          <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>Events where redundancy prevented an outage</span>
         </div>
       </div>
     </div>

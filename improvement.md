@@ -1,55 +1,55 @@
-# Estado da implementação premium
+# Premium Implementation Status
 
-Este documento substitui a especificação inicial e registra a situação efetiva da branch `premium`.
+This document replaces the initial specification and records the effective state of the `premium` branch.
 
-## Critérios de aceitação
+## Acceptance criteria
 
-| Requisito | Estado | Implementação |
+| Requirement | Status | Implementation |
 |---|---|---|
-| Descobrir IP, intervalo e CIDR | Concluído | `/api/discovery/scan` |
-| ICMP e portas TCP configuráveis | Concluído | Limites de segurança aplicados |
-| SNMPv2c e SNMPv3 | Concluído | SysName, SysDescr e até 128 interfaces |
-| Selecionar e editar antes de importar | Concluído | Tela Descoberta |
-| Não persistir credenciais da descoberta | Concluído | Credenciais existem somente na requisição |
-| Biblioteca de ícones | Concluído | Nativos + SVG/PNG personalizado |
-| Ícone refletido em todas as vistas | Concluído | Campo central `devices.icon_id` |
-| Layout persistente | Concluído | `topology_positions`, sem dependência de localStorage |
-| Múltiplas conexões de banco | Concluído | SQLite/PostgreSQL/MySQL/MSSQL/Oracle |
-| Escolher banco principal | Concluído | Migração, validação e ativação após restart |
-| Identities/sequences multibanco | Concluído | Adaptadores PostgreSQL/MySQL/MSSQL/Oracle |
-| Rollback de banco | Concluído | Manual validado e fallback automático no startup |
-| Fontes SQL externas | Concluído | SELECT parametrizado e limitado |
-| Email, Telegram e WhatsApp | Concluído | Credenciais criptografadas e teste individual |
-| Regras de notificação | Concluído | Eventos, severidade, canais, recuperação e lembrete |
-| Deduplicação | Concluído | Alerta ativo + `notification_deliveries` |
-| Persistência após reinício | Concluído | Banco como fonte de verdade e autoload |
-| Retenção e thresholds operacionais | Concluído | Recarregados no motor de monitoramento |
-| Export e import | Concluído | Inventário, topologia, redundância, regras e preferências |
-| Segredos fora do backup/API | Concluído | Respostas mascaradas e export sem credenciais |
-| Audit log | Concluído | Operações administrativas relevantes |
+| Discover IP addresses, ranges, and CIDR blocks | Complete | `/api/discovery/scan` |
+| Configurable ICMP and TCP ports | Complete | Safety limits applied |
+| SNMPv2c and SNMPv3 | Complete | SysName, SysDescr, and up to 128 interfaces |
+| Select and edit before import | Complete | Discovery screen |
+| Do not persist discovery credentials | Complete | Credentials exist only in the request |
+| Icon library | Complete | Built-in and custom SVG/PNG |
+| Icons reflected in every view | Complete | Central `devices.icon_id` field |
+| Persistent layout | Complete | `topology_positions`, independent of localStorage |
+| Multiple database connections | Complete | SQLite/PostgreSQL/MySQL/MSSQL/Oracle |
+| Select a primary database | Complete | Migration, validation, and activation after restart |
+| Multi-database identities/sequences | Complete | PostgreSQL/MySQL/MSSQL/Oracle adapters |
+| Database rollback | Complete | Validated manual rollback and automatic startup fallback |
+| External SQL sources | Complete | Parameterized and limited SELECT |
+| Email, Telegram, and WhatsApp | Complete | Encrypted credentials and individual tests |
+| Notification rules | Complete | Events, severity, channels, recovery, and reminders |
+| Deduplication | Complete | Active alert + `notification_deliveries` |
+| Persistence after restart | Complete | Database as source of truth with automatic loading |
+| Operational retention and thresholds | Complete | Reloaded by the monitoring engine |
+| Export and import | Complete | Inventory, topology, redundancy, rules, and preferences |
+| Secrets excluded from backups and APIs | Complete | Masked responses and credential-free exports |
+| Audit log | Complete | Relevant administrative operations |
 
-## Decisões arquiteturais
+## Architectural decisions
 
-- SQLite permanece o fallback local.
-- A promoção de banco nunca apaga a origem.
-- O destino deve estar vazio para evitar merge destrutivo.
-- A troca de engine requer reinício do backend.
-- `SECRET_KEY` protege tokens, passwords e a seleção do banco principal.
-- WhatsApp depende de API oficial ou provider configurável; WhatsApp Web não é utilizado.
-- O frontend só confirma alterações depois de sucesso do backend.
+- SQLite remains the local fallback.
+- Database promotion never deletes the source.
+- The destination must be empty to prevent destructive merging.
+- Switching engines requires a backend restart.
+- `SECRET_KEY` protects tokens, passwords, and the primary-database selection.
+- WhatsApp depends on an official API or configurable provider; WhatsApp Web is not used.
+- The frontend confirms changes only after backend success.
 
-## Validação automatizada
+## Automated validation
 
-A suíte em `backend/tests/test_platform.py` cobre:
+`backend/tests/test_platform.py` covers:
 
-- ausência de segredos nas respostas;
-- bloqueio de SQL destrutivo;
-- execução de fonte somente leitura;
-- backup/restore com gateway, link e layout;
-- migração integral para novo banco principal;
-- criptografia do arquivo de ativação.
+- Absence of secrets in responses.
+- Blocking destructive SQL.
+- Read-only source execution.
+- Backup and restoration with gateway, link, and layout.
+- Complete migration to a new primary database.
+- Activation-file encryption.
 
-Execute:
+Run:
 
 ```powershell
 cd backend
@@ -59,6 +59,6 @@ cd ..\frontend
 npm run build
 ```
 
-## Operação recomendada
+## Recommended operation
 
-Antes de produção, configure autenticação/reverse proxy, HTTPS, uma `SECRET_KEY` exclusiva, PostgreSQL com TLS, backups nativos e utilizadores de privilégio mínimo. Consulte [SECURITY.md](SECURITY.md), [arquitetura](docs/ARCHITECTURE.md) e [bancos](docs/DATABASES.md).
+Before production, configure authentication or a reverse proxy, HTTPS, a unique `SECRET_KEY`, PostgreSQL with TLS, native backups, and least-privilege users. See [SECURITY.md](SECURITY.md), [architecture](docs/ARCHITECTURE.md), and [databases](docs/DATABASES.md).

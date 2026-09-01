@@ -89,12 +89,17 @@ async def ping_target(ip_address: str, count: int = 2, timeout: float = 2.0) -> 
             re.search(r"resposta de", output, re.IGNORECASE)
             or re.search(r"reply from", output, re.IGNORECASE)
             or re.search(r"bytes=", output, re.IGNORECASE)
+            or re.search(r"bytes from", output, re.IGNORECASE)
         )
 
-        is_up = (has_reply or packet_loss < 100.0) and returncode == 0
+        # A successful ping process is the portable availability signal. The
+        # output is localized on some Linux distributions, so textual matches
+        # are used only to extract metrics, not to decide whether the host is up.
+        is_up = returncode == 0
 
-        # If device answered ping, ensure packet_loss < 100
-        if has_reply and packet_loss == 100.0:
+        # If ping succeeded but its localized loss line was not recognized,
+        # avoid reporting a contradictory 100% loss for an online device.
+        if is_up and packet_loss == 100.0:
             packet_loss = 0.0
 
         return {

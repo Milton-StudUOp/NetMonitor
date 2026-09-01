@@ -1,11 +1,8 @@
 import asyncio
 import base64
 import json
-import smtplib
 from datetime import datetime, timezone
-from email.message import EmailMessage
 
-import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy import DateTime as SQLDateTime, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +22,7 @@ from app.security import decrypt_secret, encrypt_secret
 from app.services.database_switcher import migrate_and_activate
 from app.services.database_adapters import execute_read_only, test_authenticated_connection, validate_database_url
 from app.db_bootstrap import get_previous_database, rollback_active_database
+from app.services.notification.channels import safe_delivery_error, send_notification, validate_integration
 
 router = APIRouter(prefix="/api/platform", tags=["Platform configuration"])
 BUILTIN_ICONS = [
@@ -222,34 +220,34 @@ async def save_notification(provider: str, data: NotificationIntegrationInput, d
     if not item: item = NotificationIntegration(provider=provider, name=data.name); db.add(item)
     existing = json.loads(decrypt_secret(item.encrypted_secrets) or "{}")
     existing.update({k: v for k, v in data.secrets.items() if v})
-    item.name, item.enabled, item.public_config = data.name, data.enabled, data.config
-    item.encrypted_secrets = encrypt_secret(json.dumps(existing)); await db.flush(); await _audit(db, "UPSERT", "NOTIFICATION", item.id, f"{provider} integration saved")
+    config = dict(data.config)
+    if provider == "TELEGRAM" and config.get("chat_ids"):
+        config.pop("chat_id", None)
+    if provider == "WHATSAPP" and config.get("recipients"):
+        config.pop("recipient", None)
+    if data.enabled:
+        try:
+            validate_integration(provider, config, existing)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+    item.name, item.enabled, item.public_config = data.name, data.enabled, config
+    item.encrypted_secrets = encrypt_secret(json.dumps(existing))
+    item.last_status, item.last_error = "UNTESTED", None
+    await db.flush(); await _audit(db, "UPSERT", "NOTIFICATION", item.id, f"{provider} integration saved")
     return _integration_read(item)
 
 
 async def _send_notification_test(item: NotificationIntegration):
-    cfg = item.public_config or {}; sec = json.loads(decrypt_secret(item.encrypted_secrets) or "{}")
-    if item.provider == "TELEGRAM":
-        token, chat = sec.get("bot_token"), cfg.get("chat_id")
-        if not token or not chat: raise ValueError("Bot token and Chat ID are required")
-        async with httpx.AsyncClient(timeout=8) as client:
-            response = await client.post(f"https://api.telegram.org/bot{token}/sendMessage", json={"chat_id": chat, "text": "NetMonitor: teste de integração concluído."}); response.raise_for_status()
-    elif item.provider == "WHATSAPP":
-        url, token = cfg.get("api_url"), sec.get("api_token")
-        if not url or not token: raise ValueError("API URL and token are required")
-        async with httpx.AsyncClient(timeout=8) as client:
-            response = await client.post(url, headers={"Authorization": f"Bearer {token}"}, json={"sender": cfg.get("sender_id"), "recipient": cfg.get("recipient"), "message": "NetMonitor: teste de integração concluído."}); response.raise_for_status()
-    elif item.provider == "EMAIL":
-        host, recipients = cfg.get("smtp_server"), cfg.get("recipients", [])
-        if not host or not recipients: raise ValueError("SMTP server and recipients are required")
-        msg = EmailMessage(); msg["Subject"] = "NetMonitor - Teste"; msg["From"] = cfg.get("from_address"); msg["To"] = ", ".join(recipients); msg.set_content("Integração de email configurada com sucesso.")
-        def send():
-            smtp_cls = smtplib.SMTP_SSL if cfg.get("ssl") else smtplib.SMTP
-            with smtp_cls(host, int(cfg.get("smtp_port", 587)), timeout=8) as smtp:
-                if cfg.get("tls") and not cfg.get("ssl"): smtp.starttls()
-                if cfg.get("username"): smtp.login(cfg["username"], sec.get("password", ""))
-                smtp.send_message(msg)
-        await asyncio.to_thread(send)
+    await send_notification(
+        item,
+        title="NetMonitor notification test",
+        message="The test message was delivered successfully. NetMonitor can use this channel for operational incidents and recovery notifications.",
+        severity="INFORMATION",
+        context={
+            "event_type": "CONFIGURATION_TEST", "target": item.name,
+            "occurred_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        },
+    )
 
 
 @router.post("/notifications/{provider}/test")
@@ -258,8 +256,8 @@ async def test_notification(provider: str, db: AsyncSession = Depends(get_db)):
     if not item: raise HTTPException(404, "Notification integration not found")
     try:
         await _send_notification_test(item); item.last_status = "SUCCESS"; item.last_error = None
-    except Exception:
-        item.last_status = "FAILED"; item.last_error = "Provider rejected the test or could not be reached. Verify configuration and network access."
+    except Exception as exc:
+        item.last_status = "FAILED"; item.last_error = safe_delivery_error(exc)
     item.last_tested_at = datetime.now(timezone.utc); await _audit(db, "TEST", "NOTIFICATION", item.id, f"{item.provider} test: {item.last_status}")
     return {"status": item.last_status, "message": item.last_error or "Test notification sent."}
 
@@ -271,15 +269,31 @@ async def list_rules(db: AsyncSession = Depends(get_db)):
 
 @router.post("/notification-rules", response_model=NotificationRuleRead, status_code=201)
 async def create_rule(data: NotificationRuleInput, db: AsyncSession = Depends(get_db)):
-    item = NotificationRule(**data.model_dump()); db.add(item); await db.flush(); await _audit(db, "CREATE", "NOTIFICATION_RULE", item.id, f"Rule {item.name} created"); return item
+    existing = (await db.execute(select(NotificationRule).where(NotificationRule.name == data.name))).scalar_one_or_none()
+    if existing:
+        raise HTTPException(409, "A notification rule with this name already exists")
+    item = NotificationRule(**data.model_dump())
+    db.add(item)
+    await db.flush()
+    await db.refresh(item)
+    await _audit(db, "CREATE", "NOTIFICATION_RULE", item.id, f"Rule {item.name} created")
+    return NotificationRuleRead.model_validate(item)
 
 
 @router.put("/notification-rules/{item_id}", response_model=NotificationRuleRead)
 async def update_rule(item_id: int, data: NotificationRuleInput, db: AsyncSession = Depends(get_db)):
     item = await db.get(NotificationRule, item_id)
     if not item: raise HTTPException(404, "Notification rule not found")
+    duplicate = (await db.execute(select(NotificationRule).where(
+        NotificationRule.name == data.name, NotificationRule.id != item_id
+    ))).scalar_one_or_none()
+    if duplicate:
+        raise HTTPException(409, "A notification rule with this name already exists")
     for k, v in data.model_dump().items(): setattr(item, k, v)
-    await _audit(db, "UPDATE", "NOTIFICATION_RULE", item.id, f"Rule {item.name} updated"); return item
+    await db.flush()
+    await db.refresh(item)
+    await _audit(db, "UPDATE", "NOTIFICATION_RULE", item.id, f"Rule {item.name} updated")
+    return NotificationRuleRead.model_validate(item)
 
 
 @router.delete("/notification-rules/{item_id}", status_code=204)

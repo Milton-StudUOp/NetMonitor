@@ -36,10 +36,10 @@ export default function History() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
         <div>
           <h2 style={{ fontSize: '1.35rem', color: '#fff', fontWeight: 700, letterSpacing: '-0.01em' }}>
-            Histórico Operacional de Rede em Tempo Real
+            Real-Time Network Operations History
           </h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginTop: '2px' }}>
-            Acompanhe o registro sequencial de sondagens ICMP/SNMP e o histórico completo de incidentes salvos no banco de dados.
+            Track sequential ICMP/SNMP probes and the complete history of incidents stored in the database.
           </p>
         </div>
 
@@ -50,7 +50,7 @@ export default function History() {
           style={{ padding: '8px 16px', fontSize: '0.85rem', gap: '6px' }}
         >
           <RefreshCw size={14} className={loading ? 'spin' : ''} />
-          Atualizar Dados
+          Refresh Data
         </button>
       </div>
 
@@ -93,7 +93,7 @@ export default function History() {
             transition: 'all 0.2s ease',
           }}
         >
-          <Bell size={16} /> Incidentes e Alertas Registrados ({alerts.length})
+          <Bell size={16} /> Recorded Incidents and Alerts ({alerts.length})
         </button>
       </div>
 
@@ -103,28 +103,28 @@ export default function History() {
           {probes.length === 0 ? (
             <div style={{ padding: '48px 24px', textAlign: 'center', color: 'var(--text-muted)' }}>
               <Radio size={40} style={{ marginBottom: '12px', opacity: 0.4 }} />
-              <h4 style={{ color: '#fff', fontSize: '0.95rem', marginBottom: '4px' }}>Aguardando primeira rodada de sondagem...</h4>
+              <h4 style={{ color: '#fff', fontSize: '0.95rem', marginBottom: '4px' }}>Waiting for the first probe cycle...</h4>
               <p style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>
-                O motor de monitoramento executa pings a cada 5 segundos nos equipamentos cadastrados.
+                The monitoring engine pings registered devices every 5 seconds.
               </p>
             </div>
           ) : (
             <table className="custom-table">
               <thead>
                 <tr>
-                  <th>Data e Hora (Local)</th>
-                  <th>Alvo / Equipamento</th>
-                  <th>Tipo de Enlace</th>
-                  <th>Resultado ICMP</th>
-                  <th>Latência (ms)</th>
-                  <th>Perda de Pacotes (%)</th>
+                  <th>Date and Time (Local)</th>
+                  <th>Target / Device</th>
+                  <th>Link Type</th>
+                  <th>ICMP Result</th>
+                  <th>Latency (ms)</th>
+                  <th>Packet Loss (%)</th>
                 </tr>
               </thead>
               <tbody>
                 {probes.map((p) => (
                   <tr key={p.id}>
                     <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                      {p.timestamp ? new Date(p.timestamp).toLocaleString('pt-PT') : '—'}
+                      {p.timestamp ? new Date(p.timestamp).toLocaleString('en-GB') : '—'}
                     </td>
                     <td style={{ fontWeight: 600, color: '#fff' }}>{p.target_name}</td>
                     <td>
@@ -169,27 +169,27 @@ export default function History() {
           {alerts.length === 0 ? (
             <div style={{ padding: '48px 24px', textAlign: 'center', color: 'var(--text-muted)' }}>
               <CheckCircle size={40} style={{ marginBottom: '12px', color: '#10b981', opacity: 0.6 }} />
-              <h4 style={{ color: '#fff', fontSize: '0.95rem', marginBottom: '4px' }}>Nenhum alerta registrado</h4>
+              <h4 style={{ color: '#fff', fontSize: '0.95rem', marginBottom: '4px' }}>No alerts recorded</h4>
               <p style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>
-                Todos os equipamentos e grupos de redundância estão operando dentro da normalidade.
+                All devices and redundancy groups are operating normally.
               </p>
             </div>
           ) : (
             <table className="custom-table">
               <thead>
                 <tr>
-                  <th>Data do Disparo</th>
+                  <th>Triggered At</th>
                   <th>Severidade</th>
-                  <th>Título do Evento</th>
-                  <th>Mensagem / Causa Raiz</th>
-                  <th>Estado</th>
+                  <th>Event Title</th>
+                  <th>Message / Root Cause</th>
+                  <th>Status</th>
                 </tr>
               </thead>
               <tbody>
                 {alerts.map((a) => (
                   <tr key={a.id}>
                     <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                      {a.created_at ? new Date(a.created_at).toLocaleString('pt-PT') : '—'}
+                      {a.created_at ? new Date(a.created_at).toLocaleString('en-GB') : '—'}
                     </td>
                     <td>
                       <span className={`badge badge-${a.severity?.toLowerCase() || 'unknown'}`}>
@@ -201,15 +201,15 @@ export default function History() {
                       <div>{a.message}</div>
                       {a.root_cause && (
                         <div style={{ fontSize: '0.75rem', color: '#f59e0b', marginTop: '2px' }}>
-                          Causa: {a.root_cause}
+                          Cause: {a.root_cause}
                         </div>
                       )}
                     </td>
                     <td>
                       {a.is_resolved ? (
-                        <span className="badge badge-normal">Resolvido</span>
+                        <span className="badge badge-normal">Resolved</span>
                       ) : (
-                        <span className="badge badge-critical">Ativo</span>
+                        <span className="badge badge-critical">Active</span>
                       )}
                     </td>
                   </tr>

@@ -20,6 +20,6 @@ COPY . .
 # Allow ICMP raw sockets
 RUN setcap cap_net_raw+ep /usr/bin/ping
 
-EXPOSE 8000
+EXPOSE 5555
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "5555"]

@@ -39,7 +39,7 @@ export default function Redundancy() {
       setLinks(linkRes.data);
       setDevices(deviceRes.data);
     } catch (err) {
-      console.error('Falha ao carregar redundância:', err);
+      console.error('Failed to load redundancy:', err);
     }
   };
 
@@ -92,11 +92,11 @@ export default function Redundancy() {
     const primaryId = isDeviceGroup ? formData.primary_device_id : formData.primary_link_id;
     const secondaryId = isDeviceGroup ? formData.secondary_device_id : formData.secondary_link_id;
     if (!primaryId || !secondaryId) {
-      alert(`Selecione ${isDeviceGroup ? 'os dois equipamentos' : 'os dois enlaces'} redundantes.`);
+      alert(`Select both redundant ${isDeviceGroup ? 'devices' : 'links'}.`);
       return;
     }
     if (String(primaryId) === String(secondaryId)) {
-      alert('A unidade primária e a secundária devem ser diferentes.');
+      alert('The primary and secondary units must be different.');
       return;
     }
 
@@ -122,7 +122,7 @@ export default function Redundancy() {
       setIsModalOpen(false);
       await fetchData();
     } catch (err) {
-      alert(`Erro ao salvar grupo de redundância:\n${getApiErrorMessage(err)}`);
+      alert(`Error saving redundancy group:\n${getApiErrorMessage(err)}`);
     }
   };
 
@@ -132,14 +132,14 @@ export default function Redundancy() {
       await api.delete(`/redundancy-groups/${deleteTarget.id}`);
       await fetchData();
     } catch (err) {
-      alert(`Erro ao excluir grupo de redundância:\n${getApiErrorMessage(err)}`);
+      alert(`Error deleting redundancy group:\n${getApiErrorMessage(err)}`);
     } finally {
       setDeleteTarget(null);
     }
   };
 
-  const deviceName = (id) => devices.find((item) => item.id === id)?.name || `Equipamento #${id}`;
-  const linkName = (id) => links.find((item) => item.id === id)?.name || `Enlace #${id}`;
+  const deviceName = (id) => devices.find((item) => item.id === id)?.name || `Device #${id}`;
+  const linkName = (id) => links.find((item) => item.id === id)?.name || `Link #${id}`;
   const targetName = (group, side) => group.redundancy_type === 'DEVICE'
     ? deviceName(group[`${side}_device_id`])
     : linkName(group[`${side}_link_id`]);
@@ -160,7 +160,7 @@ export default function Redundancy() {
           value={formData[field]}
           onChange={(event) => setFormData({ ...formData, [field]: event.target.value })}
         >
-          <option value="">Selecione...</option>
+          <option value="">Select...</option>
           {options.map((item) => (
             <option key={item.id} value={item.id}>
               {item.name} {isDeviceGroup ? `(${item.ip_address || 'sem IP'})` : `(${item.status})`}
@@ -175,42 +175,42 @@ export default function Redundancy() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', gap: '16px', flexWrap: 'wrap' }}>
         <div>
-          <h2 style={{ fontSize: '1.35rem', color: '#fff', fontWeight: 700 }}>Grupos de Redundância</h2>
+          <h2 style={{ fontSize: '1.35rem', color: '#fff', fontWeight: 700 }}>Redundancy Groups</h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginTop: '2px' }}>
-            Proteja serviços com equipamentos redundantes ou caminhos de enlace alternativos.
+            Protect services with redundant devices or alternate link paths.
           </p>
         </div>
         <button className="btn btn-primary" onClick={openAdd} style={{ padding: '10px 20px' }}>
-          <Plus size={18} /> Criar Grupo
+          <Plus size={18} /> Create Group
         </button>
       </div>
 
       <div className="glass-card" style={{ padding: '14px 18px', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '12px' }}>
         <Search size={18} color="var(--text-dim)" />
-        <input className="form-input" style={{ width: '100%', border: 'none', background: 'transparent', padding: 0 }} placeholder="Buscar grupos..." value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} />
+        <input className="form-input" style={{ width: '100%', border: 'none', background: 'transparent', padding: 0 }} placeholder="Search groups..." value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} />
       </div>
 
       <div className="glass-card" style={{ overflow: 'hidden' }}>
         {filteredGroups.length === 0 ? (
           <div style={{ padding: '48px 24px', textAlign: 'center', color: 'var(--text-muted)' }}>
             <GitFork size={44} style={{ marginBottom: '16px', opacity: 0.4 }} />
-            <h4 style={{ color: '#fff', marginBottom: '6px' }}>Nenhum grupo cadastrado</h4>
-            <p>Crie redundância entre dois equipamentos, mesmo que ainda não possuam enlaces.</p>
+            <h4 style={{ color: '#fff', marginBottom: '6px' }}>No groups registered</h4>
+            <p>Create redundancy between two devices, even if they do not have links yet.</p>
           </div>
         ) : (
           <table className="custom-table">
-            <thead><tr><th>Grupo</th><th>Tipo</th><th>Primário</th><th>Secundário</th><th>Serviço</th><th>Status</th><th style={{ textAlign: 'right' }}>Ações</th></tr></thead>
+            <thead><tr><th>Group</th><th>Type</th><th>Primary</th><th>Secondary</th><th>Service</th><th>Status</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
             <tbody>{filteredGroups.map((group) => (
               <tr key={group.id}>
                 <td><div style={{ fontWeight: 600, color: '#fff' }}>{group.name}</div>{group.description && <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>{group.description}</div>}</td>
-                <td>{group.redundancy_type === 'DEVICE' ? 'Equipamentos' : 'Enlaces'}</td>
+                <td>{group.redundancy_type === 'DEVICE' ? 'Devices' : 'Links'}</td>
                 <td>{targetName(group, 'primary')}</td>
                 <td>{targetName(group, 'secondary')}</td>
                 <td>{group.service_check_type || 'NONE'}</td>
                 <td><span className={`badge badge-${group.status?.toLowerCase() || 'unknown'}`}>{group.status}</span></td>
                 <td style={{ textAlign: 'right' }}><div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                  <button className="btn btn-secondary" style={{ padding: '5px 10px', fontSize: '0.75rem' }} onClick={() => openEdit(group)}><Edit3 size={14} /> Editar</button>
-                  <button className="btn btn-danger" style={{ padding: '5px 10px', fontSize: '0.75rem' }} onClick={() => setDeleteTarget({ id: group.id, name: group.name })}><Trash2 size={14} /> Excluir</button>
+                  <button className="btn btn-secondary" style={{ padding: '5px 10px', fontSize: '0.75rem' }} onClick={() => openEdit(group)}><Edit3 size={14} /> Edit</button>
+                  <button className="btn btn-danger" style={{ padding: '5px 10px', fontSize: '0.75rem' }} onClick={() => setDeleteTarget({ id: group.id, name: group.name })}><Trash2 size={14} /> Delete</button>
                 </div></td>
               </tr>
             ))}</tbody>
@@ -218,35 +218,35 @@ export default function Redundancy() {
         )}
       </div>
 
-      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={editingId ? 'Editar Grupo de Redundância' : 'Cadastrar Grupo de Redundância'} subtitle="Defina as duas unidades que protegem o mesmo serviço" icon={GitFork} maxWidth="720px">
+      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={editingId ? 'Edit Redundancy Group' : 'Register Redundancy Group'} subtitle="Define the two units protecting the same service" icon={GitFork} maxWidth="720px">
         <form onSubmit={handleSubmit}>
-          <div className="form-group"><label className="form-label">Nome do Grupo *</label><input className="form-input" required placeholder="Ex: REDUNDANCIA_DMZ" value={formData.name} onChange={(event) => setFormData({ ...formData, name: event.target.value })} /></div>
-          <div className="form-group"><label className="form-label">Descrição</label><input className="form-input" placeholder="Ex: Par de switches que protege a DMZ" value={formData.description} onChange={(event) => setFormData({ ...formData, description: event.target.value })} /></div>
+          <div className="form-group"><label className="form-label">Group Name *</label><input className="form-input" required placeholder="Ex: REDUNDANCIA_DMZ" value={formData.name} onChange={(event) => setFormData({ ...formData, name: event.target.value })} /></div>
+          <div className="form-group"><label className="form-label">Description</label><input className="form-input" placeholder="Ex: Pair of switches protecting the DMZ" value={formData.description} onChange={(event) => setFormData({ ...formData, description: event.target.value })} /></div>
 
           <div className="form-group">
-            <label className="form-label">Modo de Redundância *</label>
+            <label className="form-label">Redundancy Mode *</label>
             <select className="form-select" value={formData.redundancy_type} onChange={(event) => handleTypeChange(event.target.value)}>
-              <option value="DEVICE">Equipamentos — não exige enlaces cadastrados</option>
-              <option value="LINK">Enlaces — caminho primário e secundário</option>
+              <option value="DEVICE">Devices — does not require registered links</option>
+              <option value="LINK">Links — primary and secondary path</option>
             </select>
             <div style={{ marginTop: '6px', fontSize: '0.76rem', color: 'var(--text-dim)' }}>
-              {formData.redundancy_type === 'DEVICE' ? 'Use para pares como SW DMZ 01 e SW DMZ 02.' : 'Use quando dois enlaces diferentes atendem ao mesmo serviço.'}
+              {formData.redundancy_type === 'DEVICE' ? 'Use for pairs such as SW DMZ 01 e SW DMZ 02.' : 'Use when two different links serve the same service.'}
             </div>
           </div>
 
-          <div className="form-row">{targetSelect('primary', 'Unidade Primária')}{targetSelect('secondary', 'Unidade Secundária')}</div>
+          <div className="form-row">{targetSelect('primary', 'Primary Unit')}{targetSelect('secondary', 'Secondary Unit')}</div>
 
           <div className="form-row">
-            <div className="form-group"><label className="form-label">Verificação de Serviço</label><select className="form-select" value={formData.service_check_type} onChange={(event) => setFormData({ ...formData, service_check_type: event.target.value })}><option value="NONE">Nenhuma</option><option value="ICMP">ICMP</option><option value="TCP">TCP</option><option value="HTTP">HTTP</option><option value="HTTPS">HTTPS</option></select></div>
-            <div className="form-group"><label className="form-label">Porta</label><input className="form-input" type="number" min="1" max="65535" disabled={!['TCP', 'HTTP', 'HTTPS'].includes(formData.service_check_type)} value={formData.service_check_port} onChange={(event) => setFormData({ ...formData, service_check_port: event.target.value })} /></div>
+            <div className="form-group"><label className="form-label">Service Check</label><select className="form-select" value={formData.service_check_type} onChange={(event) => setFormData({ ...formData, service_check_type: event.target.value })}><option value="NONE">None</option><option value="ICMP">ICMP</option><option value="TCP">TCP</option><option value="HTTP">HTTP</option><option value="HTTPS">HTTPS</option></select></div>
+            <div className="form-group"><label className="form-label">Port</label><input className="form-input" type="number" min="1" max="65535" disabled={!['TCP', 'HTTP', 'HTTPS'].includes(formData.service_check_type)} value={formData.service_check_port} onChange={(event) => setFormData({ ...formData, service_check_port: event.target.value })} /></div>
           </div>
-          <div className="form-group"><label className="form-label">Alvo do Serviço</label><input className="form-input" disabled={formData.service_check_type === 'NONE'} placeholder="IP, hostname ou URL do serviço" value={formData.service_check_target} onChange={(event) => setFormData({ ...formData, service_check_target: event.target.value })} /></div>
+          <div className="form-group"><label className="form-label">Service Target</label><input className="form-input" disabled={formData.service_check_type === 'NONE'} placeholder="Service IP, hostname, or URL" value={formData.service_check_target} onChange={(event) => setFormData({ ...formData, service_check_target: event.target.value })} /></div>
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}><button type="button" className="btn btn-secondary" onClick={() => setIsModalOpen(false)}>Cancelar</button><button type="submit" className="btn btn-primary">{editingId ? 'Atualizar Grupo' : 'Cadastrar Grupo'}</button></div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}><button type="button" className="btn btn-secondary" onClick={() => setIsModalOpen(false)}>Cancel</button><button type="submit" className="btn btn-primary">{editingId ? 'Update Group' : 'Register Group'}</button></div>
         </form>
       </Modal>
 
-      <ConfirmModal isOpen={Boolean(deleteTarget)} onClose={() => setDeleteTarget(null)} onConfirm={executeDelete} title="Excluir Grupo de Redundância" message={deleteTarget ? `Tem certeza que deseja apagar o grupo "${deleteTarget.name}"?` : ''} />
+      <ConfirmModal isOpen={Boolean(deleteTarget)} onClose={() => setDeleteTarget(null)} onConfirm={executeDelete} title="Delete Redundancy Group" message={deleteTarget ? `Are you sure you want to delete the group "${deleteTarget.name}"?` : ''} />
     </div>
   );
 }

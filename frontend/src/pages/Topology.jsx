@@ -24,10 +24,10 @@ export default function Topology() {
     <div>
       <div style={{ marginBottom: '20px' }}>
         <h2 style={{ fontSize: '1.25rem', color: '#fff', fontWeight: 600 }}>
-          Visualização da Topologia da Rede
+          Network Topology View
         </h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-          Grafo em tempo real dos equipamentos, enlaces primários (linha contínua) e caminhos redundantes (linha tracejada).
+          Real-time graph of devices, primary links (solid lines), and redundant paths (dashed lines).
         </p>
       </div>
 

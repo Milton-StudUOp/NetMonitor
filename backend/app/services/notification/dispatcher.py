@@ -1,33 +1,53 @@
-import json
-from email.message import EmailMessage
 from datetime import datetime, timedelta, timezone
 
-import aiosmtplib
-import httpx
 import structlog
 from sqlalchemy import select
 
 from app.database import async_session_factory
+from app.models.alert import Alert
+from app.models.device import Device
+from app.models.link import Link
 from app.models.platform import NotificationDelivery, NotificationIntegration, NotificationRule
-from app.security import decrypt_secret
+from app.models.redundancy_group import RedundancyGroup
+from app.services.notification.channels import send_notification
 
 logger = structlog.get_logger()
 
 
 def _event_type(title: str, recovery: bool) -> str:
-    if recovery: return "RECOVERY"
     upper = title.upper()
-    if "REDUND" in upper: return "REDUNDANCY_CRITICAL" if "CRITICAL" in upper or "CRÍTIC" in upper else "REDUNDANCY_DEGRADED"
-    if "LINK" in upper or "ENLACE" in upper: return "LINK_DOWN"
-    return "DEVICE_DOWN"
+    if "REDUND" in upper:
+        base = "REDUNDANCY_CRITICAL" if "CRITICAL" in upper or "CRÍTIC" in upper else "REDUNDANCY_DEGRADED"
+    elif "LINK" in upper or "ENLACE" in upper:
+        base = "LINK_DOWN"
+    else:
+        base = "DEVICE_DOWN"
+    if not recovery:
+        return base
+    return {"DEVICE_DOWN": "DEVICE_UP", "LINK_DOWN": "LINK_UP"}.get(base, "RECOVERY")
+
+
+def _rule_matches(rule, event: str, original_event: str, severity: str, recovery: bool, searchable_text: str) -> bool:
+    if rule.source and rule.source.lower() not in searchable_text.lower():
+        return False
+    if not recovery:
+        return rule.event_type == event and rule.severity == severity
+    if not rule.notify_recovery:
+        return False
+    if rule.event_type in {event, "RECOVERY"}:
+        return True
+    return rule.event_type == original_event and rule.severity == severity
 
 
 async def dispatch_persisted_notifications(title: str, message: str, severity: str, alert_id: int, recovery: bool = False):
     async with async_session_factory() as db:
         event = _event_type(title, recovery)
+        original_event = _event_type(title, False)
+        context = await _notification_context(db, alert_id, event, recovery)
         rules = (await db.execute(select(NotificationRule).where(NotificationRule.enabled == True))).scalars().all()
-        rules = [rule for rule in rules if ((recovery and rule.notify_recovery) or (not recovery and rule.event_type == event and rule.severity == severity))
-            and (not rule.source or rule.source.lower() in f"{title} {message}".lower())]
+        rules = [rule for rule in rules if _rule_matches(
+            rule, event, original_event, severity, recovery, f"{title} {message}"
+        )]
         if not rules: return
         now = datetime.now(timezone.utc)
         due_rules = []
@@ -40,15 +60,25 @@ async def dispatch_persisted_notifications(title: str, message: str, severity: s
             if recovery or delivery is None or (rule.reminder_minutes > 0 and now - last_sent >= timedelta(minutes=rule.reminder_minutes)):
                 due_rules.append(rule)
         if not due_rules: return
-        requested = {channel for rule in due_rules for channel in (rule.channels or [])}
         integrations = (await db.execute(select(NotificationIntegration).where(NotificationIntegration.enabled == True))).scalars().all()
-        sent = False
-        for integration in integrations:
-            if integration.provider not in requested: continue
-            try: await _send(integration, title, message, severity); sent = True
-            except Exception as exc: logger.error("persisted_notification_failed", provider=integration.provider, error=type(exc).__name__)
-        if sent:
-            for rule in due_rules:
+        integrations_by_provider = {integration.provider: integration for integration in integrations}
+        delivered_rules = []
+        for rule in due_rules:
+            rule_sent = False
+            for channel in rule.channels or []:
+                integration = integrations_by_provider.get(channel)
+                if not integration:
+                    continue
+                try:
+                    delivery_severity = "INFORMATION" if recovery else severity
+                    await send_notification(integration, title, message, delivery_severity, rule.recipients or [], context)
+                    rule_sent = True
+                except Exception as exc:
+                    logger.error("persisted_notification_failed", provider=channel, rule_id=rule.id, error=type(exc).__name__)
+            if rule_sent:
+                delivered_rules.append(rule)
+        if delivered_rules:
+            for rule in delivered_rules:
                 delivery = deliveries[rule.id]
                 if delivery:
                     delivery.last_sent_at = now; delivery.delivery_count += 1; delivery.last_kind = "RECOVERY" if recovery else "ALERT"
@@ -58,16 +88,27 @@ async def dispatch_persisted_notifications(title: str, message: str, severity: s
             await db.commit()
 
 
-async def _send(item: NotificationIntegration, title: str, message: str, severity: str):
-    cfg = item.public_config or {}; secrets = json.loads(decrypt_secret(item.encrypted_secrets) or "{}")
-    text = f"{severity}\n\n{title}\n\n{message}"
-    if item.provider == "TELEGRAM":
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.post(f"https://api.telegram.org/bot{secrets['bot_token']}/sendMessage", json={"chat_id": cfg["chat_id"], "text": text}); response.raise_for_status()
-    elif item.provider == "WHATSAPP":
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.post(cfg["api_url"], headers={"Authorization": f"Bearer {secrets['api_token']}"}, json={"sender": cfg.get("sender_id"), "recipient": cfg.get("recipient"), "message": text}); response.raise_for_status()
-    elif item.provider == "EMAIL":
-        mail = EmailMessage(); mail["Subject"] = f"[{severity}] {title}"; mail["From"] = cfg["from_address"]; mail["To"] = ", ".join(cfg["recipients"]); mail.set_content(text)
-        await aiosmtplib.send(mail, hostname=cfg["smtp_server"], port=int(cfg.get("smtp_port", 587)), username=cfg.get("username") or None, password=secrets.get("password") or None, start_tls=bool(cfg.get("tls")) and not bool(cfg.get("ssl")), use_tls=bool(cfg.get("ssl")), timeout=10)
-    logger.info("persisted_notification_sent", provider=item.provider, title=title)
+async def _notification_context(db, alert_id: int, event_type: str, recovery: bool) -> dict:
+    alert = await db.get(Alert, alert_id)
+    context = {"alert_id": alert_id, "event_type": event_type, "recovery": recovery}
+    if not alert:
+        return context
+    context["root_cause"] = alert.root_cause
+    timestamp = alert.resolved_at if recovery and alert.resolved_at else alert.created_at
+    if timestamp:
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        context["occurred_at"] = timestamp.astimezone(timezone.utc).isoformat(timespec="seconds")
+    if alert.device_id:
+        device = await db.get(Device, alert.device_id)
+        if device:
+            context["target"] = f"{device.name} ({device.ip_address or 'no IP address'})"
+    elif alert.link_id:
+        link = await db.get(Link, alert.link_id)
+        if link:
+            context["target"] = link.name
+    elif alert.redundancy_group_id:
+        group = await db.get(RedundancyGroup, alert.redundancy_group_id)
+        if group:
+            context["target"] = group.name
+    return context

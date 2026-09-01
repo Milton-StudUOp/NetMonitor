@@ -119,17 +119,17 @@ class MonitoringEngine:
                 if new_status == DeviceStatus.OFFLINE:
                     await trigger_alert(
                         severity=AlertSeverity.CRITICAL if device.is_critical else AlertSeverity.WARNING,
-                        title=f"Equipamento Inacessível: {device.name}",
-                        message=f"O equipamento '{device.name}' (IP: {device.ip_address}) não respondeu aos pings ICMP.",
+                        title=f"Device unavailable: {device.name}",
+                        message=f"The device '{device.name}' (IP: {device.ip_address}) did not respond to ICMP probes.",
                         db=db,
                         device_id=device.id,
-                        root_cause="Sem resposta ICMP - Equipamento desligado, fora da rede ou com cabo desconectado.",
+                        root_cause="No ICMP response. The device may be powered off, unreachable, or physically disconnected.",
                     )
                 elif new_status == DeviceStatus.DEGRADED:
                     await trigger_alert(
                         severity=AlertSeverity.WARNING,
-                        title=f"Equipamento impactado por dependência: {device.name}",
-                        message=f"O equipamento '{device.name}' não respondeu, mas há falha provável no gateway ou link principal.",
+                        title=f"Device affected by an upstream dependency: {device.name}",
+                        message=f"The device '{device.name}' did not respond and its gateway or primary link is likely unavailable.",
                         db=db,
                         device_id=device.id,
                         root_cause=dependency_reason,
@@ -150,20 +150,20 @@ class MonitoringEngine:
 
     async def _detect_downstream_dependency(self, device: Device, gateway_ping_cache: dict[str, dict]) -> tuple[bool, str | None]:
         if device.primary_link and device.primary_link.status == LinkStatus.DOWN:
-            return True, f"Link principal associado está DOWN: {device.primary_link.name}."
+            return True, f"The associated primary link is down: {device.primary_link.name}."
 
         if device.gateway_device and device.gateway_device.status in {
             DeviceStatus.OFFLINE,
             DeviceStatus.DEGRADED,
         }:
-            return True, f"Gateway associado está {device.gateway_device.status.value}: {device.gateway_device.name}."
+            return True, f"The associated gateway is {device.gateway_device.status.value}: {device.gateway_device.name}."
 
         gateway_ip = (device.gateway_ip_address or "").strip()
         if gateway_ip and gateway_ip != (device.ip_address or "").strip():
             if gateway_ip not in gateway_ping_cache:
                 gateway_ping_cache[gateway_ip] = await ping_target(gateway_ip, count=1)
             if not gateway_ping_cache[gateway_ip]["is_up"]:
-                return True, f"Gateway ICMP sem resposta: {gateway_ip}."
+                return True, f"The gateway did not respond to ICMP probes: {gateway_ip}."
 
         return False, None
 
@@ -201,26 +201,26 @@ class MonitoringEngine:
 
                 # Trigger real alert on link down
                 if new_status == LinkStatus.DOWN:
-                    src_name = link.source_device.name if link.source_device else "Origem"
-                    dst_name = link.destination_device.name if link.destination_device else "Destino"
+                    src_name = link.source_device.name if link.source_device else "Source"
+                    dst_name = link.destination_device.name if link.destination_device else "Destination"
                     await trigger_alert(
                         severity=AlertSeverity.WARNING,
-                        title=f"Enlace de Comunicação Caído: {link.name}",
-                        message=f"O enlace '{link.name}' entre {src_name} e {dst_name} perdeu conectividade.",
+                        title=f"Communication link down: {link.name}",
+                        message=f"The link '{link.name}' between {src_name} and {dst_name} has lost connectivity.",
                         db=db,
                         link_id=link.id,
-                        root_cause="Interrupção no canal físico ou equipamento de ponta inoperante.",
+                        root_cause="The physical channel may be interrupted or an endpoint device may be unavailable.",
                     )
                 elif new_status == LinkStatus.DEGRADED:
-                    src_name = link.source_device.name if link.source_device else "Origem"
-                    dst_name = link.destination_device.name if link.destination_device else "Destino"
+                    src_name = link.source_device.name if link.source_device else "Source"
+                    dst_name = link.destination_device.name if link.destination_device else "Destination"
                     await trigger_alert(
                         severity=AlertSeverity.WARNING,
-                        title=f"Enlace Parcialmente Disponível: {link.name}",
-                        message=f"Apenas uma ponta do enlace responde: {src_name} ↔ {dst_name}.",
+                        title=f"Link partially available: {link.name}",
+                        message=f"Only one endpoint is responding: {src_name} ↔ {dst_name}.",
                         db=db,
                         link_id=link.id,
-                        root_cause="Uma ponta está acessível e a outra está offline ou degradada.",
+                        root_cause="One endpoint is reachable while the other is offline or degraded.",
                     )
                 elif new_status == LinkStatus.UP:
                     await auto_resolve_alerts(db, link_id=link.id)

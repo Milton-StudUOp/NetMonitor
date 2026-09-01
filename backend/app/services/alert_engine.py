@@ -84,7 +84,7 @@ async def auto_resolve_alerts(
     device_id: Optional[int] = None,
     link_id: Optional[int] = None,
     redundancy_group_id: Optional[int] = None,
-    resolution_message: str = "Recuperado automaticamente",
+    resolution_message: str = "Service recovered automatically",
 ) -> List[Alert]:
     """Auto-resolves unresolved alerts when the target returns to NORMAL/UP state."""
     query = select(Alert).where(Alert.is_resolved == False)
@@ -116,7 +116,7 @@ async def auto_resolve_alerts(
             asyncio.create_task(dispatch_persisted_notifications(
                 f"RECOVERY: {alert.title}",
                 f"{resolution_message}. Downtime: {max(0, int(downtime.total_seconds() // 60))} minute(s).",
-                "INFO",
+                alert.severity.value,
                 alert.id,
                 recovery=True,
             ))

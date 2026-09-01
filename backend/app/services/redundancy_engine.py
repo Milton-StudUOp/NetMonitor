@@ -111,22 +111,22 @@ async def evaluate_redundancy_group(group_id: int, db: AsyncSession) -> Redundan
         failed_device = None
         if group.redundancy_type == RedundancyType.DEVICE:
             failed_device = primary_device if not primary_up else secondary_device
-            target_name = failed_device.name if failed_device else "equipamento redundante"
-            target_kind = "equipamento"
-            root_cause = "Equipamento redundante sem resposta ICMP."
+            target_name = failed_device.name if failed_device else "redundant device"
+            target_kind = "device"
+            root_cause = "The redundant device did not respond to ICMP probes."
         else:
             failed_link = primary_link if not primary_up else secondary_link
-            target_name = failed_link.name if failed_link else "enlace redundante"
-            target_kind = "enlace"
+            target_name = failed_link.name if failed_link else "redundant link"
+            target_kind = "link"
             analysis = await analyze_probable_root_cause(failed_link, db) if failed_link else {}
             root_cause = analysis.get("root_cause")
 
         await trigger_alert(
             severity=AlertSeverity.WARNING,
-            title=f"Perda de Redundância: {group.name}",
+            title=f"Redundancy lost: {group.name}",
             message=(
-                f"O {target_kind} '{target_name}' está indisponível. "
-                "A outra unidade mantém o serviço, mas o grupo está sem redundância."
+                f"The {target_kind} '{target_name}' is unavailable. "
+                "The remaining unit is maintaining service, but the group no longer has fault tolerance."
             ),
             db=db,
             redundancy_group_id=group.id,
@@ -137,10 +137,10 @@ async def evaluate_redundancy_group(group_id: int, db: AsyncSession) -> Redundan
     elif new_status == RedundancyStatus.CRITICAL:
         await trigger_alert(
             severity=AlertSeverity.CRITICAL,
-            title=f"INDISPONIBILIDADE TOTAL: {group.name}",
+            title=f"Total service outage: {group.name}",
             message=(
-                f"As unidades primária e secundária do grupo '{group.name}' "
-                "estão indisponíveis."
+                f"Both the primary and secondary units in '{group.name}' "
+                "are unavailable."
             ),
             db=db,
             redundancy_group_id=group.id,

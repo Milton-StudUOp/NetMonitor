@@ -1,67 +1,67 @@
-# Arquitetura e persistência
+# Architecture and Persistence
 
-## Componentes
+## Components
 
 ```text
 React/Vite
    │ REST + WebSocket
 FastAPI
-   ├── APIs administrativas
-   ├── motor de monitoramento
-   ├── redundância e alertas
-   ├── notificações
-   └── SQLAlchemy assíncrono
-          └── banco principal selecionado
+   ├── administrative APIs
+   ├── monitoring engine
+   ├── redundancy and alerts
+   ├── notifications
+   └── asynchronous SQLAlchemy
+          └── selected primary database
 ```
 
-O frontend só considera uma alteração persistida depois da resposta de sucesso da API. Equipamentos, links, posições, regras, integrações e preferências têm o banco principal como fonte de verdade.
+The frontend considers a change persisted only after a successful API response. The primary database is the source of truth for devices, links, positions, rules, integrations, and preferences.
 
-## Inicialização
+## Initialization
 
-1. `config.py` carrega ambiente e `.env`.
-2. `db_bootstrap.py` verifica a seleção criptografada do banco principal.
-3. `database.py` cria o engine assíncrono.
-4. O lifespan cria tabelas e aplica compatibilidade de schema.
-5. Preferências persistidas são carregadas no motor.
-6. O monitoramento periódico é iniciado.
-7. Frontend carrega dashboard, topologia e configurações pelas APIs.
+1. `config.py` loads the environment and `.env`.
+2. `db_bootstrap.py` checks the encrypted primary-database selection.
+3. `database.py` creates the asynchronous engine.
+4. The application lifespan creates tables and applies schema compatibility updates.
+5. Persisted preferences are loaded into the engine.
+6. Periodic monitoring starts.
+7. The frontend loads the dashboard, topology, and settings through the APIs.
 
-Se a criação/validação do schema no banco selecionado falhar, o startup autentica no banco anterior registrado, troca o engine e reconfigura a mesma `async_session_factory`; serviços já importados passam a usar o bind recuperado.
+If schema creation or validation fails on the selected database, startup authenticates against the recorded previous database, switches the engine, and reconfigures the same `async_session_factory`. Already imported services then use the recovered binding.
 
-## Persistência
+## Persistence
 
-São persistidos:
+The system persists:
 
-- equipamentos, interfaces e monitoramento;
-- gateways e enlaces automáticos/manuais;
-- grupos de redundância;
-- layout da topologia;
-- vistas nomeadas da topologia, incluindo posições e viewport;
-- ícones nativos e personalizados;
-- conexões de banco e fontes SQL;
-- integrações e regras de notificação;
-- controle de deduplicação/lembretes;
-- preferências gerais e audit log.
+- Devices, interfaces, and monitoring results.
+- Gateways and automatic or manual links.
+- Redundancy groups.
+- Topology layout.
+- Named topology views, including positions and viewport.
+- Built-in and custom icons.
+- Database connections and SQL sources.
+- Notification integrations and rules.
+- Deduplication and reminder controls.
+- General preferences and audit logs.
 
-O frontend não usa `localStorage` como fonte de configuração da topologia.
+The frontend does not use `localStorage` as the topology configuration source.
 
-## Monitoramento
+## Monitoring
 
-O motor lê intervalo, retenção e thresholds do registro `system_settings/general`. Alterações feitas na interface são recarregadas sem reiniciar. A máquina de estados exige falhas e sucessos consecutivos conforme configurado.
+The engine reads interval, retention, and thresholds from `system_settings/general`. Changes made in the interface are reloaded without restarting. The state machine requires the configured number of consecutive failures or successes.
 
-Uma limpeza horária remove resultados antigos e alertas já resolvidos que ultrapassaram a retenção. Alertas ativos não são removidos.
+An hourly cleanup removes old monitoring results and resolved alerts beyond the retention period. Active alerts are retained.
 
-## Notificações
+## Notifications
 
-O alert engine deduplica pelo alvo enquanto o alerta estiver ativo. Regras definem evento, severidade, canais, destinatários, lembrete e recuperação. A tabela `notification_deliveries` registra último envio e quantidade, evitando repetição contínua.
+The alert engine deduplicates by target while an alert remains active. Rules define the event, severity, channels, recipients, reminder, and recovery behavior. `notification_deliveries` records the latest delivery and count to prevent continuous repetition.
 
 ## Backup
 
-O formato atual é `netmonitor-config`, versão 1. IDs do arquivo são remapeados durante restore para preservar relações mesmo quando o destino já contém registros. Segredos são excluídos.
+The current format is `netmonitor-config`, version 1. File IDs are remapped during restoration to preserve relationships even when the destination already contains records. Secrets are excluded.
 
-## Limites deliberados
+## Deliberate limits
 
-- Descoberta: 1.024 hosts e 64 portas por varredura.
-- SNMP: até 128 interfaces por equipamento descoberto.
-- Fonte SQL: uma instrução `SELECT`, até 10.000 caracteres e 100 linhas retornadas.
-- Ícone personalizado: 512 KB, SVG ou PNG.
+- Discovery: 1,024 hosts and 64 ports per scan.
+- SNMP: up to 128 interfaces per discovered device.
+- SQL source: one `SELECT` statement, up to 10,000 characters and 100 returned rows.
+- Custom icon: 512 KB, SVG or PNG.

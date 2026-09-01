@@ -39,16 +39,16 @@ export default function Alerts() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px', flexWrap: 'wrap', gap: '16px' }}>
         <div>
           <h2 style={{ fontSize: '1.25rem', color: '#fff', fontWeight: 600 }}>
-            Central de Alertas e Incidentes
+            Alerts and Incidents Center
           </h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-            Histórico de alertas disparados, diagnósticos de causa provável e ações de resolução.
+            History of triggered alerts, probable-cause diagnostics, and resolution actions.
           </p>
         </div>
 
         {alerts.length > 0 && (
           <button className="btn btn-secondary" onClick={handleClearAll} style={{ padding: '8px 16px', fontSize: '0.85rem' }}>
-            Limpar Todos os Alertas
+            Clear All Alerts
           </button>
         )}
       </div>
@@ -56,7 +56,7 @@ export default function Alerts() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
         {alerts.length === 0 ? (
           <div className="glass-card" style={{ padding: '24px', color: 'var(--text-muted)' }}>
-            Nenhum alerta registrado.
+            No alerts recorded.
           </div>
         ) : (
           alerts.map((alert) => (

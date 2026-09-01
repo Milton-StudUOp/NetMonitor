@@ -2,13 +2,13 @@ import React from 'react';
 import { AlertTriangle } from 'lucide-react';
 import Modal from './Modal';
 
-export default function ConfirmModal({ isOpen, onClose, onConfirm, title, message, confirmText = 'Excluir', cancelText = 'Cancelar' }) {
+export default function ConfirmModal({ isOpen, onClose, onConfirm, title, message, confirmText = 'Delete', cancelText = 'Cancel' }) {
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={title || 'Confirmar Exclusão'}
-      subtitle="Esta ação não poderá ser desfeita"
+      title={title || 'Confirm Deletion'}
+      subtitle="This action cannot be undone"
       icon={AlertTriangle}
       maxWidth="500px"
     >

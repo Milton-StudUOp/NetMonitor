@@ -14,5 +14,5 @@ export function getApiErrorMessage(err) {
     return JSON.stringify(detail);
   }
 
-  return detail || err.message || 'Erro desconhecido';
+  return detail || err.message || 'Unknown error';
 }

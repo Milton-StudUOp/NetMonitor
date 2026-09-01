@@ -50,7 +50,7 @@ export default function AlertBanner({ alert, onResolve }) {
             color: '#fbbf24',
             fontFamily: 'var(--font-mono)',
           }}>
-            📍 <strong>Causa Provável:</strong> {alert.root_cause}
+            📍 <strong>Probable Cause:</strong> {alert.root_cause}
           </div>
         )}
       </div>

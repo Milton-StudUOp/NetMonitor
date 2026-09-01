@@ -102,6 +102,28 @@ class NotificationIntegrationInput(BaseModel):
             raise ValueError("Unsupported notification provider")
         return value
 
+    @field_validator("name")
+    @classmethod
+    def valid_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Integration name is required")
+        return value[:100]
+
+    @model_validator(mode="after")
+    def normalize_configuration(self):
+        allowed_config = {
+            "EMAIL": {"smtp_server", "smtp_port", "username", "from_address", "recipients", "tls", "ssl"},
+            "TELEGRAM": {"chat_id", "chat_ids"},
+            "WHATSAPP": {"api_url", "sender_id", "recipient", "recipients"},
+        }[self.provider]
+        allowed_secrets = {"EMAIL": {"password"}, "TELEGRAM": {"bot_token"}, "WHATSAPP": {"api_token"}}[self.provider]
+        unknown_config = set(self.config) - allowed_config
+        unknown_secrets = set(self.secrets) - allowed_secrets
+        if unknown_config or unknown_secrets:
+            raise ValueError("Configuration contains unsupported fields for this provider")
+        return self
+
 
 class NotificationIntegrationRead(BaseModel):
     id: int
@@ -126,11 +148,44 @@ class NotificationRuleInput(BaseModel):
     notify_recovery: bool = True
     enabled: bool = True
 
+    @field_validator("name")
+    @classmethod
+    def clean_rule_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Rule name is required")
+        return value
+
     @field_validator("severity")
     @classmethod
     def normalize_severity(cls, value: str) -> str:
         normalized = value.upper()
-        return "INFORMATION" if normalized == "INFO" else normalized
+        normalized = "INFORMATION" if normalized == "INFO" else normalized
+        if normalized not in {"INFORMATION", "WARNING", "CRITICAL"}:
+            raise ValueError("Unsupported notification severity")
+        return normalized
+
+    @field_validator("event_type")
+    @classmethod
+    def valid_event_type(cls, value: str) -> str:
+        normalized = value.upper()
+        allowed = {"DEVICE_DOWN", "DEVICE_UP", "LINK_DOWN", "LINK_UP", "REDUNDANCY_DEGRADED", "REDUNDANCY_CRITICAL", "RECOVERY"}
+        if normalized not in allowed:
+            raise ValueError("Unsupported notification event")
+        return normalized
+
+    @field_validator("channels")
+    @classmethod
+    def valid_channels(cls, value: list[str]) -> list[str]:
+        normalized = list(dict.fromkeys(channel.upper() for channel in value))
+        if not normalized or any(channel not in {"EMAIL", "TELEGRAM", "WHATSAPP"} for channel in normalized):
+            raise ValueError("Select at least one supported notification channel")
+        return normalized
+
+    @field_validator("recipients")
+    @classmethod
+    def clean_recipients(cls, value: list[str]) -> list[str]:
+        return list(dict.fromkeys(item.strip() for item in value if item.strip()))
 
 
 class NotificationRuleRead(NotificationRuleInput):

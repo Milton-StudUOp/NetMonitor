@@ -53,43 +53,43 @@ export default function Dashboard() {
       {/* KPI Cards Grid */}
       <div className="grid-cards">
         <StatusCard
-          title="Equipamentos Monitorados"
+          title="Monitored Devices"
           count={summary?.total_devices ?? 0}
           icon={Server}
           type="info"
           subtitle={`${summary?.online_devices ?? 0} Online · ${summary?.offline_devices ?? 0} Offline`}
         />
         <StatusCard
-          title="Links de Comunicação"
+          title="Communication Links"
           count={summary?.total_links ?? 0}
           icon={Network}
           type="info"
           subtitle={`${summary?.up_links ?? 0} UP · ${summary?.down_links ?? 0} DOWN`}
         />
         <StatusCard
-          title="Grupos de Redundância"
+          title="Redundancy Groups"
           count={summary?.total_redundancy_groups ?? 0}
           icon={GitFork}
           type={summary?.degraded_redundancy_groups > 0 ? 'degraded' : 'normal'}
-          subtitle={`${summary?.normal_redundancy_groups ?? 0} Normal · ${summary?.degraded_redundancy_groups ?? 0} Degradados`}
+          subtitle={`${summary?.normal_redundancy_groups ?? 0} Normal · ${summary?.degraded_redundancy_groups ?? 0} Degraded`}
         />
         <StatusCard
-          title="Alertas Ativos"
+          title="Active Alerts"
           count={summary?.active_alerts_count ?? 0}
           icon={AlertTriangle}
           type={summary?.critical_alerts_count > 0 ? 'critical' : (summary?.active_alerts_count > 0 ? 'degraded' : 'normal')}
-          subtitle={`${summary?.critical_alerts_count ?? 0} Críticos`}
+          subtitle={`${summary?.critical_alerts_count ?? 0} Critical`}
         />
       </div>
 
       {/* Redundancy Groups Overview */}
       <div style={{ marginBottom: '24px' }}>
         <h2 style={{ fontSize: '1.1rem', fontWeight: 600, color: '#fff', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <ShieldCheck size={20} color="var(--color-info)" /> Estado da Redundância em Tempo Real
+          <ShieldCheck size={20} color="var(--color-info)" /> Real-Time Redundancy Status
         </h2>
         {redundancyGroups.length === 0 ? (
           <div className="glass-card" style={{ padding: '20px', color: 'var(--text-muted)' }}>
-            Nenhum grupo de redundância cadastrado.
+            No redundancy groups registered.
           </div>
         ) : (
           redundancyGroups.map((g) => <RedundancyPanel key={g.id} group={g} />)
@@ -99,7 +99,7 @@ export default function Dashboard() {
       {/* Full-width topology */}
       <div>
           <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#fff', marginBottom: '12px' }}>
-            Mapa da Topologia de Enlaces
+            Link Topology Map
           </h3>
           <TopologyGraph graphData={topology} />
       </div>

@@ -71,7 +71,7 @@ export default function Links() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.source_device_id || !formData.destination_device_id) {
-      alert('Selecione os equipamentos de Origem e Destino.');
+      alert('Select the source and destination devices.');
       return;
     }
 
@@ -92,7 +92,7 @@ export default function Links() {
       setIsModalOpen(false);
       fetchData();
     } catch (err) {
-      alert('Erro ao salvar enlace:\n' + getApiErrorMessage(err));
+      alert('Error saving link:\n' + getApiErrorMessage(err));
     }
   };
 
@@ -102,7 +102,7 @@ export default function Links() {
       await api.delete(`/links/${deleteTarget.id}`);
       fetchData();
     } catch (err) {
-      alert('Erro ao excluir enlace:\n' + getApiErrorMessage(err));
+      alert('Error deleting link:\n' + getApiErrorMessage(err));
     } finally {
       setDeleteTarget(null);
     }
@@ -124,15 +124,15 @@ export default function Links() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
         <div>
           <h2 style={{ fontSize: '1.35rem', color: '#fff', fontWeight: 700, letterSpacing: '-0.01em' }}>
-            Enlaces de Comunicação
+            Communication Links
           </h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginTop: '2px' }}>
-            Configure os canais físicos e lógicos entre equipamentos monitorados.
+            Configure physical and logical channels between monitored devices.
           </p>
         </div>
 
         <button className="btn btn-primary" onClick={handleOpenAdd} style={{ padding: '10px 20px', fontSize: '0.9rem' }}>
-          <Plus size={18} /> Criar Novo Enlace
+          <Plus size={18} /> Create New Link
         </button>
       </div>
 
@@ -142,7 +142,7 @@ export default function Links() {
           type="text"
           className="form-input"
           style={{ width: '100%', border: 'none', background: 'transparent', padding: 0 }}
-          placeholder="Buscar enlaces por nome ou equipamentos de ponta..."
+          placeholder="Search links by name or endpoint devices..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
         />
@@ -152,22 +152,22 @@ export default function Links() {
         {filteredLinks.length === 0 ? (
           <div style={{ padding: '48px 24px', textAlign: 'center', color: 'var(--text-muted)' }}>
             <Network size={44} style={{ marginBottom: '16px', opacity: 0.4 }} />
-            <h4 style={{ color: '#fff', fontSize: '1rem', marginBottom: '6px' }}>Nenhum enlace cadastrado</h4>
+            <h4 style={{ color: '#fff', fontSize: '1rem', marginBottom: '6px' }}>No links registered</h4>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-dim)', maxWidth: '440px', margin: '0 auto' }}>
-              Cadastre enlaces conectando equipamentos para construir o mapa topológico.
+              Register links between devices to build the topology map.
             </p>
           </div>
         ) : (
           <table className="custom-table">
             <thead>
               <tr>
-                <th>Nome do Enlace</th>
+                <th>Link Name</th>
                 <th>Meio</th>
-                <th>Origem e Destino</th>
-                <th>Prioridade</th>
-                <th>Intervalo</th>
+                <th>Source and Destination</th>
+                <th>Priority</th>
+                <th>Interval</th>
                 <th>Status</th>
-                <th style={{ textAlign: 'right' }}>Ações</th>
+                <th style={{ textAlign: 'right' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -207,10 +207,10 @@ export default function Links() {
                   <td style={{ textAlign: 'right' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
                       <button className="btn btn-secondary" style={{ padding: '5px 10px', fontSize: '0.75rem' }} onClick={() => handleOpenEdit(link)}>
-                        <Edit3 size={14} /> Editar
+                        <Edit3 size={14} /> Edit
                       </button>
                       <button className="btn btn-danger" style={{ padding: '5px 10px', fontSize: '0.75rem' }} onClick={() => setDeleteTarget({ id: link.id, name: link.name })}>
-                        <Trash2 size={14} /> Excluir
+                        <Trash2 size={14} /> Delete
                       </button>
                     </div>
                   </td>
@@ -224,20 +224,20 @@ export default function Links() {
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        title={editingId ? 'Editar Enlace' : 'Cadastrar Novo Enlace'}
-        subtitle="Conecte dois equipamentos monitorados para acompanhamento de disponibilidade"
+        title={editingId ? 'Edit Link' : 'Register New Link'}
+        subtitle="Connect two monitored devices to track availability"
         icon={Network}
         maxWidth="720px"
       >
         <form onSubmit={handleSubmit}>
           <div style={{ marginBottom: '20px' }}>
             <h4 style={{ fontSize: '0.85rem', fontWeight: 600, color: '#3b82f6', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '12px' }}>
-              1. Identificação do Enlace
+              1. Link Identification
             </h4>
 
             <div className="form-row">
               <div className="form-group">
-                <label className="form-label">Nome do Enlace *</label>
+                <label className="form-label">Link Name *</label>
                 <input
                   className="form-input"
                   type="text"
@@ -249,28 +249,28 @@ export default function Links() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Tipo de Meio *</label>
+                <label className="form-label">Media Type *</label>
                 <select
                   className="form-select"
                   required
                   value={formData.link_type}
                   onChange={(e) => setFormData({ ...formData, link_type: e.target.value })}
                 >
-                  <option value="FIBER">Fibra Óptica</option>
-                  <option value="ETHERNET">Ethernet / Cabo Metálico</option>
-                  <option value="RADIO">Rádio Enlace</option>
-                  <option value="VPN">VPN / Túnel Virtual</option>
+                  <option value="FIBER">Fiber Optic</option>
+                  <option value="ETHERNET">Ethernet / Copper Cable</option>
+                  <option value="RADIO">Radio Link</option>
+                  <option value="VPN">VPN / Virtual Tunnel</option>
                   <option value="OTHER">Outro</option>
                 </select>
               </div>
             </div>
 
             <div className="form-group">
-              <label className="form-label">Descrição</label>
+              <label className="form-label">Description</label>
               <input
                 className="form-input"
                 type="text"
-                placeholder="Ex: Fibra principal entre OCC e CCP"
+                placeholder="E.g.: Primary fiber between OCC and CCP"
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               />
@@ -279,19 +279,19 @@ export default function Links() {
 
           <div style={{ marginBottom: '20px' }}>
             <h4 style={{ fontSize: '0.85rem', fontWeight: 600, color: '#3b82f6', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '12px' }}>
-              2. Equipamentos de Ponta
+              2. Endpoint Devices
             </h4>
 
             <div className="form-row">
               <div className="form-group">
-                <label className="form-label">Equipamento de Origem *</label>
+                <label className="form-label">Source Device *</label>
                 <select
                   className="form-select"
                   required
                   value={formData.source_device_id}
                   onChange={(e) => setFormData({ ...formData, source_device_id: e.target.value })}
                 >
-                  <option value="">Selecione a origem...</option>
+                  <option value="">Select the source...</option>
                   {devices.map((device) => (
                     <option key={device.id} value={device.id}>
                       {device.name} ({device.ip_address || 'Sem IP'})
@@ -301,14 +301,14 @@ export default function Links() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Equipamento de Destino *</label>
+                <label className="form-label">Destination Device *</label>
                 <select
                   className="form-select"
                   required
                   value={formData.destination_device_id}
                   onChange={(e) => setFormData({ ...formData, destination_device_id: e.target.value })}
                 >
-                  <option value="">Selecione o destino...</option>
+                  <option value="">Select the destination...</option>
                   {devices.map((device) => (
                     <option key={device.id} value={device.id}>
                       {device.name} ({device.ip_address || 'Sem IP'})
@@ -321,25 +321,25 @@ export default function Links() {
 
           <div style={{ marginBottom: '24px' }}>
             <h4 style={{ fontSize: '0.85rem', fontWeight: 600, color: '#3b82f6', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '12px' }}>
-              3. Prioridade e Monitoramento
+              3. Priority and Monitoring
             </h4>
 
             <div className="form-row">
               <div className="form-group">
-                <label className="form-label">Prioridade *</label>
+                <label className="form-label">Priority *</label>
                 <select
                   className="form-select"
                   required
                   value={formData.priority}
                   onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
                 >
-                  <option value="PRIMARY">Primário</option>
-                  <option value="SECONDARY">Secundário</option>
+                  <option value="PRIMARY">Primary</option>
+                  <option value="SECONDARY">Secondary</option>
                 </select>
               </div>
 
               <div className="form-group">
-                <label className="form-label">Intervalo de Monitoramento (s)</label>
+                <label className="form-label">Monitoring Interval (s)</label>
                 <input
                   className="form-input"
                   type="number"
@@ -356,16 +356,16 @@ export default function Links() {
                 checked={formData.is_critical}
                 onChange={(e) => setFormData({ ...formData, is_critical: e.target.checked })}
               />
-              Enlace crítico para operação
+              Critical link for operations
             </label>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '12px', borderTop: '1px solid var(--border-color)', paddingTop: '16px' }}>
             <button type="button" className="btn btn-secondary" onClick={() => setIsModalOpen(false)}>
-              Cancelar
+              Cancel
             </button>
             <button type="submit" className="btn btn-primary">
-              {editingId ? 'Atualizar Enlace' : 'Cadastrar Enlace'}
+              {editingId ? 'Update Link' : 'Register Link'}
             </button>
           </div>
         </form>
@@ -375,8 +375,8 @@ export default function Links() {
         isOpen={Boolean(deleteTarget)}
         onClose={() => setDeleteTarget(null)}
         onConfirm={executeDelete}
-        title="Excluir Enlace"
-        message={deleteTarget ? `Tem certeza que deseja apagar o enlace "${deleteTarget.name}"?` : ''}
+        title="Delete Link"
+        message={deleteTarget ? `Are you sure you want to delete the link "${deleteTarget.name}"?` : ''}
       />
     </div>
   );
