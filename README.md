@@ -90,7 +90,9 @@ In **Discovery**, enter one of the following formats:
 192.168.1.0/24
 ```
 
-Each scan is limited to 1,024 hosts and 64 ports per target. Discovery credentials are not persisted. Run scans only on authorized networks.
+Only the target is required. Discovery first identifies active hosts through ICMP, the local ARP cache, and optional SNMP. It can then perform no TCP scan, scan the backend-managed Top 100 TCP ports, or scan up to 64 custom ports. Safe is the default profile; Normal increases concurrency, while Aggressive must be explicitly enabled by an administrator with `ALLOW_AGGRESSIVE_DISCOVERY=true`.
+
+Scans expose live host/port counters, elapsed time, progress, and controlled cancellation. Each scan is limited to 1,024 hosts. TCP checks are performed only against hosts already identified as active, and discovery credentials are removed from memory when the job finishes. Run scans only on authorized networks.
 
 ## Topology and icons
 

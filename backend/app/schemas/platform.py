@@ -221,14 +221,37 @@ class SystemSettingsInput(BaseModel):
 
 class DiscoveryRequest(BaseModel):
     target: str = Field(min_length=1)
-    methods: list[str] = Field(default_factory=lambda: ["ICMP", "TCP"])
-    ports: list[int] = Field(default_factory=lambda: [22, 23, 80, 443, 161, 8080, 8443])
-    timeout_seconds: float = Field(default=0.8, ge=0.1, le=10)
+    methods: list[str] = Field(default_factory=lambda: ["ICMP"])
+    port_scan_mode: str = "NONE"
+    scan_profile: str = "SAFE"
+    ports: list[int] = Field(default_factory=list)
+    timeout_seconds: float | None = Field(default=None, ge=0.1, le=10)
+    retries: int | None = Field(default=None, ge=0, le=3)
+    concurrency: int | None = Field(default=None, ge=1, le=100)
+    rate_limit: float | None = Field(default=None, ge=1, le=500)
     snmp_community: str | None = None
     snmp_version: str = "2c"
     snmp_username: str | None = None
     snmp_auth_key: str | None = None
     snmp_priv_key: str | None = None
+
+    @model_validator(mode="after")
+    def validate_discovery_options(self):
+        self.port_scan_mode = self.port_scan_mode.upper()
+        self.scan_profile = self.scan_profile.upper()
+        if self.port_scan_mode not in {"NONE", "TOP_100", "CUSTOM"}:
+            raise ValueError("Unsupported port scan mode")
+        if self.scan_profile not in {"SAFE", "NORMAL", "AGGRESSIVE"}:
+            raise ValueError("Unsupported scan profile")
+        self.methods = list(dict.fromkeys(method.upper() for method in self.methods))
+        if not set(self.methods).issubset({"ICMP", "SNMP"}):
+            raise ValueError("Supported host discovery methods are ICMP and SNMP")
+        self.ports = sorted(set(self.ports))
+        if any(port < 1 or port > 65535 for port in self.ports):
+            raise ValueError("Ports must be between 1 and 65535")
+        if len(self.ports) > 64:
+            raise ValueError("Custom scans are limited to 64 ports")
+        return self
 
 
 class DiscoveredDevice(BaseModel):
@@ -246,7 +269,7 @@ class DiscoveredDevice(BaseModel):
 
 class DiscoveryImportDevice(DiscoveredDevice):
     name: str
-    location: str = "Descoberta de rede"
+    location: str = "Network discovery"
     group_name: str | None = None
     icon_id: int | None = None
     monitoring_method: str = "ICMP"

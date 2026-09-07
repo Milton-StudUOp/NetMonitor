@@ -61,7 +61,7 @@ The current format is `netmonitor-config`, version 1. File IDs are remapped duri
 
 ## Deliberate limits
 
-- Discovery: 1,024 hosts and 64 ports per scan.
+- Discovery: 1,024 hosts; 64 custom ports or the backend-managed Top 100 list per scan. Host discovery always precedes optional TCP checks.
 - SNMP: up to 128 interfaces per discovered device.
 - SQL source: one `SELECT` statement, up to 10,000 characters and 100 returned rows.
 - Custom icon: 512 KB, SVG or PNG.

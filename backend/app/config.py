@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     # App
     SECRET_KEY: str = "local-development-only"
     DEBUG: bool = False
+    ALLOW_AGGRESSIVE_DISCOVERY: bool = False
 
     @field_validator("DEBUG", mode="before")
     @classmethod

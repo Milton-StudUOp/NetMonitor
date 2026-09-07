@@ -270,6 +270,30 @@ body {
 .notice { border-radius:8px; padding:11px 14px; font-size:.84rem; margin:0 0 15px; border:1px solid; }
 .notice.success { color:#34d399; background:#064e3b40; border-color:#10b98155; }
 .notice.error { color:#f87171; background:#7f1d1d40; border-color:#ef444455; }
+.notice.warning { color:#fbbf24; background:#78350f40; border-color:#f59e0b55; }
+.discovery-progress { padding:16px; margin-bottom:15px; border-color:rgba(59,130,246,.28); }
+.progress-heading, .progress-stats { display:flex; justify-content:space-between; gap:16px; }
+.progress-heading { margin-bottom:10px; }
+.progress-track { height:10px; overflow:hidden; position:relative; border-radius:999px; background:#0a0e1a; border:1px solid rgba(148,163,184,.14); }
+.progress-track > div { height:100%; border-radius:inherit; background:linear-gradient(90deg,#2563eb,var(--color-info),#60a5fa); box-shadow:0 0 14px var(--color-info-glow); transition:width .3s ease; }
+.progress-track > div.is-indeterminate { position:absolute; width:32%; animation:discovery-loading 1.25s ease-in-out infinite; }
+@keyframes discovery-loading { from{left:-32%} to{left:100%} }
+.progress-stats { margin-top:12px; flex-wrap:wrap; color:var(--text-muted); font-size:.78rem; }
+.progress-stats strong { color:var(--text-main); margin-left:4px; }
+.discovery-form { display:grid; grid-template-columns:repeat(12,minmax(0,1fr)); gap:16px; align-items:end; }
+.discovery-form .form-group { min-width:0; margin:0; }
+.discovery-form .form-input,.discovery-form .form-select { width:100%; min-height:40px; box-sizing:border-box; }
+.discovery-target { grid-column:span 7; }
+.discovery-port-mode { grid-column:span 2; }
+.discovery-profile { grid-column:span 3; }
+.discovery-form.has-custom-ports .discovery-target { grid-column:span 5; }
+.discovery-form.has-custom-ports .discovery-custom-ports { grid-column:span 3; }
+.discovery-methods { grid-column:1 / 10; min-height:40px; padding:0 2px; gap:16px; }
+.discovery-methods .method-title { color:var(--text-main); font-weight:600; }
+.discovery-methods .method-hint { padding-left:16px; border-left:1px solid var(--border-color); color:var(--text-dim); }
+.discovery-actions { grid-column:10 / -1; display:flex; justify-content:flex-end; align-items:center; min-height:40px; }
+.discovery-actions .btn { min-height:40px; min-width:154px; justify-content:center; }
+.discovery-snmp { grid-column:1 / -1; display:grid; grid-template-columns:repeat(4,minmax(160px,1fr)); gap:16px; padding-top:16px; border-top:1px solid var(--border-color); }
 .notification-intro { display:flex; gap:12px; align-items:flex-start; padding:16px 18px; margin-bottom:16px; color:var(--color-info); }
 .notification-intro strong { color:#fff; font-size:.92rem; }
 .notification-intro p { color:var(--text-muted); font-size:.78rem; margin:4px 0 0; }
@@ -303,4 +327,5 @@ body {
 .current-database { display:flex; align-items:center; gap:10px; padding:12px; margin-bottom:10px; border:1px solid #10b98155; background:#064e3b35; border-radius:8px; }
 .current-database span { color:#34d399; font-size:.65rem; font-weight:700; }.current-database strong{color:#fff}.current-database small{color:var(--text-muted)}
 .topology-canvas:fullscreen { width:100vw !important; height:100vh !important; border:0 !important; border-radius:0 !important; }
-@media(max-width:1100px){.provider-grid{grid-template-columns:1fr}.settings-grid{grid-template-columns:1fr}}
+@media(max-width:1100px){.provider-grid{grid-template-columns:1fr}.settings-grid{grid-template-columns:1fr}.discovery-target,.discovery-form.has-custom-ports .discovery-target{grid-column:span 7}.discovery-port-mode{grid-column:span 5}.discovery-custom-ports,.discovery-form.has-custom-ports .discovery-custom-ports{grid-column:span 7}.discovery-profile{grid-column:span 5}.discovery-methods{grid-column:1 / 9}.discovery-actions{grid-column:9 / -1}.discovery-snmp{grid-template-columns:repeat(2,minmax(180px,1fr))}}
+@media(max-width:700px){.discovery-form{display:flex;align-items:stretch}.discovery-form>*,.discovery-snmp{width:100%}.discovery-snmp{display:grid;grid-template-columns:1fr}.discovery-methods{flex-wrap:wrap}.discovery-methods .method-title{width:100%}.discovery-methods .method-hint{padding-left:0;border-left:0;width:100%}.discovery-actions{justify-content:stretch}.discovery-actions .btn{width:100%}}
