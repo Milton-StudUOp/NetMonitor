@@ -3,10 +3,11 @@ from app.models.device import Device, DeviceStatus, DeviceType  # noqa: F401
 from app.models.interface import Interface, InterfaceStatus  # noqa: F401
 from app.models.link import Link, LinkPriority, LinkStatus, LinkType  # noqa: F401
 from app.models.redundancy_group import RedundancyGroup, RedundancyStatus, RedundancyType, ServiceCheckType  # noqa: F401
-from app.models.monitoring_result import MonitoringResult, MonitoringTargetType, MonitoringStatus  # noqa: F401
+from app.models.monitoring_result import MetricAggregate, MonitoringResult, MonitoringTargetType, MonitoringStatus  # noqa: F401
 from app.models.alert import Alert, AlertSeverity  # noqa: F401
-from app.models.platform import (AuditLog, DatabaseConnection, DatabaseDataSource, IconAsset, NotificationDelivery,
-                                 NotificationIntegration, NotificationRule, SystemSetting, TopologyPosition, TopologySnapshot)  # noqa: F401
+from app.models.platform import (AuditLog, DatabaseConnection, DatabaseDataSource, DatabaseSchemaVersion, IconAsset, NotificationDelivery,
+                                 NotificationIntegration, NotificationRule, SystemSetting, TopologyPosition, TopologySnapshot,
+                                 UserAccount, AuthSession, PasswordResetToken)  # noqa: F401
 
 __all__ = [
     "Base",
@@ -14,8 +15,8 @@ __all__ = [
     "Interface", "InterfaceStatus",
     "Link", "LinkPriority", "LinkStatus", "LinkType",
     "RedundancyGroup", "RedundancyStatus", "RedundancyType", "ServiceCheckType",
-    "MonitoringResult", "MonitoringTargetType", "MonitoringStatus",
+    "MonitoringResult", "MonitoringTargetType", "MonitoringStatus", "MetricAggregate",
     "Alert", "AlertSeverity",
-    "AuditLog", "DatabaseConnection", "DatabaseDataSource", "IconAsset", "NotificationDelivery", "NotificationIntegration",
-    "NotificationRule", "SystemSetting", "TopologyPosition", "TopologySnapshot",
+    "AuditLog", "DatabaseConnection", "DatabaseDataSource", "DatabaseSchemaVersion", "IconAsset", "NotificationDelivery", "NotificationIntegration",
+    "NotificationRule", "SystemSetting", "TopologyPosition", "TopologySnapshot", "UserAccount", "AuthSession", "PasswordResetToken",
 ]

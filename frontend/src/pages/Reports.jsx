@@ -1,77 +1,27 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Download, FileText, Filter, RefreshCw } from 'lucide-react';
 import api from '../api/client';
-import { FileText, Download } from 'lucide-react';
+import { getApiErrorMessage } from '../utils/errors';
+
+const initial = { period:'daily', start:'', end:'', target_type:'', target_id:'', severity:'', probe_status:'' };
+const dateBoundary=(date,endOfDay)=>new Date(`${date}T${endOfDay?'23:59:59.999':'00:00:00'}`).toISOString();
+const paramsFor = filters => { const params=new URLSearchParams(); Object.entries(filters).forEach(([key,value])=>{if(value)params.set(key,['start','end'].includes(key)?dateBoundary(value,key==='end'):value)}); return params.toString(); };
+const value = (number, suffix='') => number == null ? 'No data' : `${number}${suffix}`;
 
 export default function Reports() {
-  const [period, setPeriod] = useState('daily');
-  const [reportData, setReportData] = useState(null);
-
-  const fetchReport = async () => {
-    try {
-      const res = await api.get(`/reports?period=${period}`);
-      setReportData(res.data);
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  useEffect(() => {
-    fetchReport();
-  }, [period]);
-
-  const metrics = reportData?.metrics;
-
-  return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
-        <div>
-          <h2 style={{ fontSize: '1.25rem', color: '#fff', fontWeight: 600 }}>
-            Reports and Metrics SLA / MTTR / MTBF
-          </h2>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-            Consolidated analysis of infrastructure availability and redundancy losses.
-          </p>
-        </div>
-
-        <div style={{ display: 'flex', gap: '12px' }}>
-          {['daily', 'weekly', 'monthly'].map((p) => (
-            <button
-              key={p}
-              onClick={() => setPeriod(p)}
-              className={`btn ${period === p ? 'btn-primary' : 'btn-secondary'}`}
-              style={{ textTransform: 'capitalize' }}
-            >
-              {p === 'daily' ? 'Daily' : p === 'weekly' ? 'Weekly' : 'Monthly'}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px', marginBottom: '24px' }}>
-        <div className="glass-card" style={{ padding: '20px' }}>
-          <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Overall Availability (SLA)</span>
-          <div style={{ fontSize: '2.5rem', fontWeight: 700, color: '#10b981', margin: '8px 0' }}>
-            {metrics?.availability_pct ?? 100}%
-          </div>
-          <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>Based on probe history ICMP/SNMP</span>
-        </div>
-
-        <div className="glass-card" style={{ padding: '20px' }}>
-          <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Mean Time to Repair (MTTR)</span>
-          <div style={{ fontSize: '2.5rem', fontWeight: 700, color: '#3b82f6', margin: '8px 0' }}>
-            {metrics?.mttr_minutes ?? 0} <span style={{ fontSize: '1rem' }}>min</span>
-          </div>
-          <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>Average time to incident resolution</span>
-        </div>
-
-        <div className="glass-card" style={{ padding: '20px' }}>
-          <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Redundancy Losses</span>
-          <div style={{ fontSize: '2.5rem', fontWeight: 700, color: '#f59e0b', margin: '8px 0' }}>
-            {metrics?.redundancy_loss_events ?? 0}
-          </div>
-          <span style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>Events where redundancy prevented an outage</span>
-        </div>
-      </div>
-    </div>
-  );
+  const [filters,setFilters]=useState(initial); const [report,setReport]=useState(null); const [loading,setLoading]=useState(false); const [exporting,setExporting]=useState(false); const [error,setError]=useState(''); const [inventory,setInventory]=useState({devices:[],links:[],groups:[]});
+  const fetchReport=useCallback(async()=>{setLoading(true);setError('');try{setReport((await api.get(`/reports?${paramsFor(filters)}`)).data)}catch(err){setError(getApiErrorMessage(err))}finally{setLoading(false)}},[filters]);
+  useEffect(()=>{fetchReport()},[fetchReport]);
+  useEffect(()=>{Promise.all([api.get('/devices'),api.get('/links'),api.get('/redundancy-groups')]).then(([devices,links,groups])=>setInventory({devices:devices.data,links:links.data,groups:groups.data})).catch(()=>{})},[]);
+  const change=e=>setFilters(old=>({...old,[e.target.name]:e.target.name==='target_type'?'':e.target.value,...(e.target.name==='target_type'?{target_type:e.target.value,target_id:''}:{})}));
+  const targetOptions=filters.target_type==='DEVICE'?inventory.devices:filters.target_type==='LINK'?inventory.links:filters.target_type==='REDUNDANCY_GROUP'?inventory.groups:[];
+  const exportCsv=async()=>{setExporting(true);setError('');try{const response=await api.get(`/reports/export?${paramsFor(filters)}`,{responseType:'blob'});const disposition=response.headers['content-disposition']||'';const filename=disposition.match(/filename="?([^";]+)"?/)?.[1]||'network-monitor-report.csv';const url=URL.createObjectURL(response.data);const anchor=document.createElement('a');anchor.href=url;anchor.download=filename;anchor.click();URL.revokeObjectURL(url)}catch(err){setError(getApiErrorMessage(err))}finally{setExporting(false)}};
+  const metrics=report?.metrics||{};
+  return <div className="sticky-filter-page"><div className="page-title"><div><h2>Reports and SLA Metrics</h2><p>Build and export operational reports using the same active filters.</p></div><div className="row-actions"><button className="btn btn-secondary" onClick={fetchReport} disabled={loading}><RefreshCw size={15} className={loading?'spin':''}/> Refresh</button><button className="btn btn-primary" onClick={exportCsv} disabled={exporting||loading}><Download size={16}/> {exporting?'Exporting…':'Export filtered CSV'}</button></div></div>
+    <div className="glass-card filter-panel"><div className="filter-panel-title"><Filter size={16}/><strong>Report filters</strong></div><div className="filter-grid report-filters"><div className="form-group"><label className="form-label">Preset period</label><select name="period" className="form-select" value={filters.period} onChange={change}><option value="daily">Last 24 hours</option><option value="weekly">Last 7 days</option><option value="monthly">Last 30 days</option><option value="quarterly">Last 90 days</option></select></div><div className="form-group"><label className="form-label">Start date</label><input name="start" type="date" className="form-input" value={filters.start} onChange={change}/></div><div className="form-group"><label className="form-label">End date</label><input name="end" type="date" className="form-input" value={filters.end} onChange={change}/></div><div className="form-group"><label className="form-label">Target type</label><select name="target_type" className="form-select" value={filters.target_type} onChange={change}><option value="">All targets</option><option value="DEVICE">Devices</option><option value="LINK">Links</option><option value="REDUNDANCY_GROUP">Redundancy groups</option></select></div><div className="form-group"><label className="form-label">Target</label><select name="target_id" className="form-select" value={filters.target_id} onChange={change} disabled={!filters.target_type}><option value="">{filters.target_type?'All selected targets':'Select a target type first'}</option>{targetOptions.map(item=><option key={item.id} value={item.id}>{item.name}{filters.target_type==='DEVICE'&&item.ip_address?` — ${item.ip_address}`:''}</option>)}</select></div><div className="form-group"><label className="form-label">Alert severity</label><select name="severity" className="form-select" value={filters.severity} onChange={change}><option value="">All severities</option><option>INFORMATION</option><option>WARNING</option><option>CRITICAL</option></select></div><div className="form-group"><label className="form-label">Probe status</label><select name="probe_status" className="form-select" value={filters.probe_status} onChange={change}><option value="">All states</option><option>UP</option><option>DOWN</option><option>DEGRADED</option><option>UNKNOWN</option></select></div></div></div>
+    {error&&<div className="notice error">{error}</div>}{report&&<div className="report-range"><FileText size={15}/> {new Date(report.start_time).toLocaleString()} — {new Date(report.end_time).toLocaleString()}</div>}
+    <div className="report-metric-grid"><Metric label="Availability (SLA)" value={value(metrics.availability_pct,'%')} note={`${metrics.total_probes||0} filtered probes`} tone="green"/><Metric label="Mean Time to Repair" value={value(metrics.mttr_minutes,' min')} note="Resolved filtered incidents" tone="blue"/><Metric label="Mean Time Between Failures" value={value(metrics.mtbf_hours,' h')} note="Selected window / incidents" tone="cyan"/><Metric label="Total incidents" value={value(metrics.total_failures)} note={`${metrics.critical_alerts||0} critical · ${metrics.warning_alerts||0} warning`} tone="red"/><Metric label="Redundancy losses" value={value(metrics.redundancy_loss_events)} note="Filtered redundancy events" tone="amber"/><Metric label="Inventory" value={`${metrics.total_devices||0} / ${metrics.total_links||0}`} note="Devices / links" tone="slate"/></div>
+    <div className="report-detail-grid"><section className="glass-card report-table"><h3>Filtered incidents</h3>{report?.alerts?.length?<table className="custom-table"><thead><tr><th>Date</th><th>Severity</th><th>Title</th><th>Status</th></tr></thead><tbody>{report.alerts.slice(0,20).map(item=>{const severity=item.severity||'INFORMATION';return <tr key={item.id}><td>{new Date(item.created_at).toLocaleString()}</td><td><span className={`badge badge-${severity.toLowerCase()}`}>{severity}</span></td><td>{item.title}</td><td>{item.status}</td></tr>})}</tbody></table>:<div className="filtered-empty"><span>No incidents for these filters.</span></div>}</section></div>
+  </div>;
 }
+function Metric({label,value:metricValue,note,tone}){return <div className={`report-metric tone-${tone}`}><span>{label}</span><strong>{metricValue}</strong><small>{note}</small></div>}

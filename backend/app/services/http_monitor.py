@@ -30,7 +30,7 @@ async def check_http_endpoint(
                     "response_time_ms": round(elapsed_ms, 2),
                 }
     except Exception as e:
-        logger.debug("http_check_failed", url=url, error=str(e))
+        logger.debug("http_check_failed", error_type=type(e).__name__)
         return {
             "is_up": False,
             "status_code": None,

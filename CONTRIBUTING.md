@@ -4,7 +4,7 @@
 
 1. Create a branch from `premium` for premium features or from `main` for the free edition.
 2. Do not include credentials, `.env`, `.active-database`, databases, logs, or real data.
-3. Preserve SQLite and PostgreSQL compatibility when changing models.
+3. Preserve SQLite, PostgreSQL, MySQL/MariaDB, SQL Server, and Oracle compatibility when changing models.
 4. Add Pydantic validation, controlled error handling, and audit logging for administrative operations.
 5. Update all affected documentation.
 
@@ -30,6 +30,9 @@ New tables are created by `Base.metadata.create_all`. Changes to existing tables
 - Counts for each table.
 - Absence of URLs or passwords in responses and logs.
 - Preservation of the source database.
+- Rejection of an incompatible `SECRET_KEY` without opening a fallback database.
+
+Never add default credentials, bootstrap identities, SNMP communities, secrets, or development authentication bypasses to production code. Test-only values must be isolated in the test environment.
 
 ## Pull requests
 

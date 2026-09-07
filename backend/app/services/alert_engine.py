@@ -62,7 +62,7 @@ async def trigger_alert(
     await db.commit()
     await db.refresh(alert)
 
-    logger.info("alert_created", id=alert.id, severity=severity, title=title)
+    logger.info("alert_created", id=alert.id, severity=severity)
 
     # Broadcast via WebSocket
     await ws_manager.broadcast("new_alert", {

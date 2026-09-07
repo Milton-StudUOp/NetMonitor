@@ -28,7 +28,7 @@ async def check_tcp_port(ip_address: str, port: int, timeout: float = 3.0) -> di
             "response_time_ms": round(elapsed_ms, 2),
         }
     except Exception as e:
-        logger.debug("tcp_check_failed", ip=ip_address, port=port, error=str(e))
+        logger.debug("tcp_check_failed", error_type=type(e).__name__)
         return {
             "is_up": False,
             "response_time_ms": None,

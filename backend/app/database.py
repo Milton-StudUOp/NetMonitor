@@ -8,13 +8,20 @@ from app.db_bootstrap import load_active_database
 
 settings = get_settings()
 active_database_url, active_database_metadata = load_active_database(settings.DATABASE_URL, settings.SECRET_KEY)
+migration_in_progress = False
 
 def _create_engine(url: str):
-    kwargs = {"echo": settings.DEBUG}
+    # SQL statement logging can expose credentials and personal data through
+    # bound parameters, and is prohibitively noisy for monitoring workloads.
+    kwargs = {"echo": False, "hide_parameters": True}
     if url.startswith("sqlite"):
         kwargs["connect_args"] = {"check_same_thread": False}
     else:
         kwargs.update({"pool_pre_ping": True, "pool_size": 10, "max_overflow": 20})
+        if url.startswith("mysql"):
+            kwargs["connect_args"] = {"init_command": "SET time_zone = '+00:00'"}
+        elif url.startswith("postgresql"):
+            kwargs["connect_args"] = {"server_settings": {"timezone": "UTC"}}
     return create_async_engine(url, **kwargs)
 
 

@@ -140,7 +140,7 @@ def _guess_type(ports: list[int], model: str | None = None, hostname: str | None
 async def _snmp_identity(ip: str, request: DiscoveryRequest, timeout: float) -> dict:
     try:
         from pysnmp.hlapi.asyncio import CommunityData, ContextData, ObjectIdentity, ObjectType, SnmpEngine, UdpTransportTarget, UsmUserData, getCmd
-        auth = UsmUserData(request.snmp_username or "", request.snmp_auth_key, request.snmp_priv_key) if request.snmp_version == "3" else CommunityData(request.snmp_community or "public", mpModel=1)
+        auth = UsmUserData(request.snmp_username or "", request.snmp_auth_key, request.snmp_priv_key) if request.snmp_version == "3" else CommunityData(request.snmp_community, mpModel=1)
         engine = SnmpEngine(); transport = UdpTransportTarget((ip, 161), timeout=timeout, retries=0)
         error, error_status, _, bindings = await asyncio.wait_for(getCmd(engine, auth, transport, ContextData(), ObjectType(ObjectIdentity("1.3.6.1.2.1.1.5.0")), ObjectType(ObjectIdentity("1.3.6.1.2.1.1.1.0")), ObjectType(ObjectIdentity("1.3.6.1.2.1.1.2.0")), ObjectType(ObjectIdentity("1.3.6.1.2.1.1.7.0"))), timeout + .5)
         if error or error_status or len(bindings) < 2: return {}

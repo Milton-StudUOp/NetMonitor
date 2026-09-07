@@ -26,10 +26,10 @@ async def send_telegram_alert(title: str, message: str, severity: str) -> bool:
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json=payload, timeout=5.0) as resp:
                 if resp.status == 200:
-                    logger.info("telegram_alert_sent", title=title)
+                    logger.info("telegram_alert_sent")
                     return True
                 logger.warning("telegram_alert_http_error", status=resp.status)
                 return False
     except Exception as e:
-        logger.error("telegram_alert_failed", error=str(e))
+        logger.error("telegram_alert_failed", error_type=type(e).__name__)
         return False

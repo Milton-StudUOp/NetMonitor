@@ -33,10 +33,10 @@ async def send_teams_alert(title: str, message: str, severity: str) -> bool:
         async with aiohttp.ClientSession() as session:
             async with session.post(settings.TEAMS_WEBHOOK_URL, json=card, timeout=5.0) as resp:
                 if resp.status in (200, 204):
-                    logger.info("teams_alert_sent", title=title)
+                    logger.info("teams_alert_sent")
                     return True
                 logger.warning("teams_alert_http_error", status=resp.status)
                 return False
     except Exception as e:
-        logger.error("teams_alert_failed", error=str(e))
+        logger.error("teams_alert_failed", error_type=type(e).__name__)
         return False

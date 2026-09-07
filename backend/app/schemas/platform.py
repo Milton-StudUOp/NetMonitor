@@ -214,6 +214,7 @@ class TopologySnapshotInput(TopologyLayoutInput):
 class SystemSettingsInput(BaseModel):
     timezone: str = "UTC"
     retention_days: int = Field(default=90, ge=1, le=3650)
+    aggregate_retention_days: int = Field(default=1825, ge=30, le=7300)
     default_monitoring_interval: int = Field(default=30, ge=1)
     failure_threshold: int = Field(default=3, ge=1)
     success_threshold: int = Field(default=2, ge=1)
@@ -246,6 +247,10 @@ class DiscoveryRequest(BaseModel):
         self.methods = list(dict.fromkeys(method.upper() for method in self.methods))
         if not set(self.methods).issubset({"ICMP", "SNMP"}):
             raise ValueError("Supported host discovery methods are ICMP and SNMP")
+        if "SNMP" in self.methods and self.snmp_version != "3" and not self.snmp_community:
+            raise ValueError("SNMP community is required for SNMP v1/v2c discovery")
+        if "SNMP" in self.methods and self.snmp_version == "3" and not self.snmp_username:
+            raise ValueError("SNMP username is required for SNMPv3 discovery")
         self.ports = sorted(set(self.ports))
         if any(port < 1 or port > 65535 for port in self.ports):
             raise ValueError("Ports must be between 1 and 65535")

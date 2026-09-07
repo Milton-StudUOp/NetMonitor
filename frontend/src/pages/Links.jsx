@@ -4,11 +4,16 @@ import api from '../api/client';
 import Modal from '../components/Modal';
 import ConfirmModal from '../components/ConfirmModal';
 import { getApiErrorMessage } from '../utils/errors';
+import Pagination from '../components/Pagination';
 
-export default function Links() {
+const PAGE_SIZE = 25;
+
+export default function Links({ user }) {
+  const canManageLinks = user?.role === 'ADMINISTRATOR';
   const [links, setLinks] = useState([]);
   const [devices, setDevices] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [page, setPage] = useState(1);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -118,9 +123,11 @@ export default function Links() {
     getDeviceName(link.source_device_id).toLowerCase().includes(searchTerm.toLowerCase()) ||
     getDeviceName(link.destination_device_id).toLowerCase().includes(searchTerm.toLowerCase())
   );
+  const visibleLinks = filteredLinks.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  useEffect(() => { setPage(current => Math.min(current, Math.max(1, Math.ceil(filteredLinks.length / PAGE_SIZE)))); }, [filteredLinks.length]);
 
   return (
-    <div>
+    <div className="data-page">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
         <div>
           <h2 style={{ fontSize: '1.35rem', color: '#fff', fontWeight: 700, letterSpacing: '-0.01em' }}>
@@ -131,9 +138,9 @@ export default function Links() {
           </p>
         </div>
 
-        <button className="btn btn-primary" onClick={handleOpenAdd} style={{ padding: '10px 20px', fontSize: '0.9rem' }}>
+        {canManageLinks && <button className="btn btn-primary" onClick={handleOpenAdd} style={{ padding: '10px 20px', fontSize: '0.9rem' }}>
           <Plus size={18} /> Create New Link
-        </button>
+        </button>}
       </div>
 
       <div className="glass-card" style={{ padding: '14px 18px', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -144,11 +151,11 @@ export default function Links() {
           style={{ width: '100%', border: 'none', background: 'transparent', padding: 0 }}
           placeholder="Search links by name or endpoint devices..."
           value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
+          onChange={(e) => { setSearchTerm(e.target.value); setPage(1); }}
         />
       </div>
 
-      <div className="glass-card" style={{ overflow: 'hidden' }}>
+      <div className="glass-card data-grid-card">
         {filteredLinks.length === 0 ? (
           <div style={{ padding: '48px 24px', textAlign: 'center', color: 'var(--text-muted)' }}>
             <Network size={44} style={{ marginBottom: '16px', opacity: 0.4 }} />
@@ -167,11 +174,11 @@ export default function Links() {
                 <th>Priority</th>
                 <th>Interval</th>
                 <th>Status</th>
-                <th style={{ textAlign: 'right' }}>Actions</th>
+                {canManageLinks && <th style={{ textAlign: 'right' }}>Actions</th>}
               </tr>
             </thead>
             <tbody>
-              {filteredLinks.map((link) => (
+              {visibleLinks.map((link) => (
                 <tr key={link.id}>
                   <td>
                     <div style={{ fontWeight: 600, color: '#fff' }}>{link.name}</div>
@@ -204,7 +211,7 @@ export default function Links() {
                       {link.status}
                     </span>
                   </td>
-                  <td style={{ textAlign: 'right' }}>
+                  {canManageLinks && <td style={{ textAlign: 'right' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
                       <button className="btn btn-secondary" style={{ padding: '5px 10px', fontSize: '0.75rem' }} onClick={() => handleOpenEdit(link)}>
                         <Edit3 size={14} /> Edit
@@ -213,13 +220,15 @@ export default function Links() {
                         <Trash2 size={14} /> Delete
                       </button>
                     </div>
-                  </td>
+                  </td>}
                 </tr>
               ))}
             </tbody>
           </table>
         )}
       </div>
+
+      <Pagination page={page} pageSize={PAGE_SIZE} total={filteredLinks.length} count={visibleLinks.length} onPageChange={setPage}/>
 
       <Modal
         isOpen={isModalOpen}

@@ -4,6 +4,9 @@ import api from '../api/client';
 import Modal from '../components/Modal';
 import ConfirmModal from '../components/ConfirmModal';
 import { getApiErrorMessage } from '../utils/errors';
+import Pagination from '../components/Pagination';
+
+const PAGE_SIZE = 25;
 
 const emptyForm = {
   name: '',
@@ -18,11 +21,13 @@ const emptyForm = {
   service_check_port: '',
 };
 
-export default function Redundancy() {
+export default function Redundancy({ user }) {
+  const canManageRedundancy = user?.role === 'ADMINISTRATOR';
   const [groups, setGroups] = useState([]);
   const [links, setLinks] = useState([]);
   const [devices, setDevices] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [page, setPage] = useState(1);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -146,6 +151,8 @@ export default function Redundancy() {
   const filteredGroups = groups.filter((group) =>
     group.name.toLowerCase().includes(searchTerm.toLowerCase())
     || group.description?.toLowerCase().includes(searchTerm.toLowerCase()));
+  const visibleGroups = filteredGroups.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  useEffect(() => { setPage(current => Math.min(current, Math.max(1, Math.ceil(filteredGroups.length / PAGE_SIZE)))); }, [filteredGroups.length]);
 
   const targetSelect = (side, label) => {
     const isDeviceGroup = formData.redundancy_type === 'DEVICE';
@@ -172,7 +179,7 @@ export default function Redundancy() {
   };
 
   return (
-    <div>
+    <div className="data-page">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', gap: '16px', flexWrap: 'wrap' }}>
         <div>
           <h2 style={{ fontSize: '1.35rem', color: '#fff', fontWeight: 700 }}>Redundancy Groups</h2>
@@ -180,17 +187,17 @@ export default function Redundancy() {
             Protect services with redundant devices or alternate link paths.
           </p>
         </div>
-        <button className="btn btn-primary" onClick={openAdd} style={{ padding: '10px 20px' }}>
+        {canManageRedundancy && <button className="btn btn-primary" onClick={openAdd} style={{ padding: '10px 20px' }}>
           <Plus size={18} /> Create Group
-        </button>
+        </button>}
       </div>
 
       <div className="glass-card" style={{ padding: '14px 18px', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '12px' }}>
         <Search size={18} color="var(--text-dim)" />
-        <input className="form-input" style={{ width: '100%', border: 'none', background: 'transparent', padding: 0 }} placeholder="Search groups..." value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} />
+        <input className="form-input" style={{ width: '100%', border: 'none', background: 'transparent', padding: 0 }} placeholder="Search groups..." value={searchTerm} onChange={(event) => { setSearchTerm(event.target.value); setPage(1); }} />
       </div>
 
-      <div className="glass-card" style={{ overflow: 'hidden' }}>
+      <div className="glass-card data-grid-card">
         {filteredGroups.length === 0 ? (
           <div style={{ padding: '48px 24px', textAlign: 'center', color: 'var(--text-muted)' }}>
             <GitFork size={44} style={{ marginBottom: '16px', opacity: 0.4 }} />
@@ -199,8 +206,8 @@ export default function Redundancy() {
           </div>
         ) : (
           <table className="custom-table">
-            <thead><tr><th>Group</th><th>Type</th><th>Primary</th><th>Secondary</th><th>Service</th><th>Status</th><th style={{ textAlign: 'right' }}>Actions</th></tr></thead>
-            <tbody>{filteredGroups.map((group) => (
+            <thead><tr><th>Group</th><th>Type</th><th>Primary</th><th>Secondary</th><th>Service</th><th>Status</th>{canManageRedundancy&&<th style={{ textAlign: 'right' }}>Actions</th>}</tr></thead>
+            <tbody>{visibleGroups.map((group) => (
               <tr key={group.id}>
                 <td><div style={{ fontWeight: 600, color: '#fff' }}>{group.name}</div>{group.description && <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>{group.description}</div>}</td>
                 <td>{group.redundancy_type === 'DEVICE' ? 'Devices' : 'Links'}</td>
@@ -208,15 +215,17 @@ export default function Redundancy() {
                 <td>{targetName(group, 'secondary')}</td>
                 <td>{group.service_check_type || 'NONE'}</td>
                 <td><span className={`badge badge-${group.status?.toLowerCase() || 'unknown'}`}>{group.status}</span></td>
-                <td style={{ textAlign: 'right' }}><div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                {canManageRedundancy&&<td style={{ textAlign: 'right' }}><div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
                   <button className="btn btn-secondary" style={{ padding: '5px 10px', fontSize: '0.75rem' }} onClick={() => openEdit(group)}><Edit3 size={14} /> Edit</button>
                   <button className="btn btn-danger" style={{ padding: '5px 10px', fontSize: '0.75rem' }} onClick={() => setDeleteTarget({ id: group.id, name: group.name })}><Trash2 size={14} /> Delete</button>
-                </div></td>
+                </div></td>}
               </tr>
             ))}</tbody>
           </table>
         )}
       </div>
+
+      <Pagination page={page} pageSize={PAGE_SIZE} total={filteredGroups.length} count={visibleGroups.length} onPageChange={setPage}/>
 
       <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={editingId ? 'Edit Redundancy Group' : 'Register Redundancy Group'} subtitle="Define the two units protecting the same service" icon={GitFork} maxWidth="720px">
         <form onSubmit={handleSubmit}>

@@ -1,17 +1,24 @@
 import React, { useEffect, useState } from 'react';
-import { Plus, Trash2, Edit3, Server, Search, Radio, CheckCircle, AlertCircle, RefreshCw } from 'lucide-react';
+import { Plus, Trash2, Edit3, Server, Search, Radio, CheckCircle, AlertCircle, RefreshCw, Activity } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import Modal from '../components/Modal';
 import ConfirmModal from '../components/ConfirmModal';
 import { getApiErrorMessage } from '../utils/errors';
 import DeviceIcon from '../components/DeviceIcon';
+import Pagination from '../components/Pagination';
 
-export default function Devices() {
+const PAGE_SIZE = 25;
+
+export default function Devices({ user }) {
+  const canManageDevices = user?.role !== 'VIEWER';
+  const navigate = useNavigate();
   const [devices, setDevices] = useState([]);
   const [links, setLinks] = useState([]);
   const [icons, setIcons] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState('ALL');
+  const [page, setPage] = useState(1);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [pingResult, setPingResult] = useState({});
@@ -160,9 +167,11 @@ export default function Devices() {
     const matchesType = typeFilter === 'ALL' || d.device_type === typeFilter;
     return matchesSearch && matchesType;
   });
+  const visibleDevices = filteredDevices.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  useEffect(() => { setPage(current => Math.min(current, Math.max(1, Math.ceil(filteredDevices.length / PAGE_SIZE)))); }, [filteredDevices.length]);
 
   return (
-    <div>
+    <div className="data-page">
       {/* Action Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
         <div>
@@ -174,9 +183,9 @@ export default function Devices() {
           </p>
         </div>
 
-        <button className="btn btn-primary" onClick={handleOpenAdd} style={{ padding: '10px 20px', fontSize: '0.9rem' }}>
+        {canManageDevices && <button className="btn btn-primary" onClick={handleOpenAdd} style={{ padding: '10px 20px', fontSize: '0.9rem' }}>
           <Plus size={18} /> Add Device
-        </button>
+        </button>}
       </div>
 
       {/* Filter Bar */}
@@ -189,7 +198,7 @@ export default function Devices() {
             style={{ width: '100%', border: 'none', background: 'transparent', padding: 0 }}
             placeholder="Search by name, IP, or location..."
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={(e) => { setSearchTerm(e.target.value); setPage(1); }}
           />
         </div>
 
@@ -199,7 +208,7 @@ export default function Devices() {
             className="form-select"
             style={{ padding: '6px 12px', fontSize: '0.85rem' }}
             value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value)}
+            onChange={(e) => { setTypeFilter(e.target.value); setPage(1); }}
           >
             <option value="ALL">All Types</option>
             <option value="SWITCH">Switch</option>
@@ -214,14 +223,14 @@ export default function Devices() {
       </div>
 
       {/* Table Container */}
-      <div className="glass-card" style={{ overflow: 'hidden' }}>
+      <div className="glass-card data-grid-card">
         {filteredDevices.length === 0 ? (
           <div style={{ padding: '48px 24px', textAlign: 'center', color: 'var(--text-muted)' }}>
             <Server size={44} style={{ marginBottom: '16px', opacity: 0.4 }} />
             <h4 style={{ color: '#fff', fontSize: '1rem', marginBottom: '6px' }}>No devices found</h4>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-dim)', maxWidth: '400px', margin: '0 auto' }}>
               {devices.length === 0
-                ? 'Start by clicking the "+ Add Device" button above to register your first switch or radio.'
+                ? canManageDevices ? 'Start by clicking the "+ Add Device" button above to register your first switch or radio.' : 'No devices are currently available.'
                 : 'No devices match the applied filters.'}
             </p>
           </div>
@@ -240,10 +249,10 @@ export default function Devices() {
               </tr>
             </thead>
             <tbody>
-              {filteredDevices.map((d) => (
+              {visibleDevices.map((d) => (
                 <tr key={d.id}>
                   <td>
-                    <div style={{ display:'flex', alignItems:'center', gap:'8px', fontWeight: 600, color: '#fff', fontSize: '0.92rem' }}><DeviceIcon icon={icons.find(i => i.id === d.icon_id)} size={18} />{d.name}</div>
+                    <button className="device-name-link" onClick={() => navigate(`/devices/${d.id}?from=devices`)} title="Open device metrics"><DeviceIcon icon={icons.find(i => i.id === d.icon_id)} size={18} />{d.name}</button>
                     {d.model && <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>{d.manufacturer} {d.model}</div>}
                   </td>
                   <td>
@@ -298,22 +307,23 @@ export default function Devices() {
                   </td>
                   <td style={{ textAlign: 'right' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px' }}>
-                      <button
+                      <button className="btn btn-secondary" style={{ padding: '5px 10px', fontSize: '0.75rem' }} onClick={() => navigate(`/devices/${d.id}?from=devices`)} title="View Metrics"><Activity size={14} /> Metrics</button>
+                      {canManageDevices && <button
                         className="btn btn-secondary"
                         style={{ padding: '5px 10px', fontSize: '0.75rem' }}
                         onClick={() => handleOpenEdit(d)}
                         title="Edit Device"
                       >
                         <Edit3 size={14} /> Edit
-                      </button>
-                      <button
+                      </button>}
+                      {canManageDevices && <button
                         className="btn btn-danger"
                         style={{ padding: '5px 10px', fontSize: '0.75rem' }}
                         onClick={() => setDeleteTarget({ id: d.id, name: d.name })}
                         title="Delete Device"
                       >
                         <Trash2 size={14} /> Delete
-                      </button>
+                      </button>}
                     </div>
                   </td>
                 </tr>
@@ -322,6 +332,8 @@ export default function Devices() {
           </table>
         )}
       </div>
+
+      <Pagination page={page} pageSize={PAGE_SIZE} total={filteredDevices.length} count={visibleDevices.length} onPageChange={setPage}/>
 
       {/* Professional Modal Form */}
       <Modal

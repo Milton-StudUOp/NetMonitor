@@ -3,12 +3,14 @@ import base64
 import json
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from sqlalchemy import DateTime as SQLDateTime, delete, select
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 import app.database as database
+from app.config import get_settings as get_app_settings
 from app.models.device import Device
 from app.models.interface import Interface
 from app.models.link import Link
@@ -20,9 +22,11 @@ from app.schemas.platform import (DatabaseConnectionInput, DatabaseConnectionRea
     NotificationRuleInput, NotificationRuleRead, SystemSettingsInput, TopologyLayoutInput, TopologySnapshotInput)
 from app.security import decrypt_secret, encrypt_secret
 from app.services.database_switcher import migrate_and_activate
-from app.services.database_adapters import execute_read_only, test_authenticated_connection, validate_database_url
+from app.services.database_adapters import (build_database_url, execute_read_only,
+    test_authenticated_connection, validate_database_url)
 from app.db_bootstrap import get_previous_database, rollback_active_database
-from app.services.notification.channels import safe_delivery_error, send_notification, validate_integration
+from app.services.notification.channels import (environment_email_integration, safe_delivery_error,
+    send_notification, validate_integration)
 
 router = APIRouter(prefix="/api/platform", tags=["Platform configuration"])
 BUILTIN_ICONS = [
@@ -39,6 +43,11 @@ BUILTIN_ICONS = [
 
 async def _audit(db: AsyncSession, action: str, entity: str, entity_id, summary: str):
     db.add(AuditLog(action=action, entity_type=entity, entity_id=str(entity_id) if entity_id else None, summary=summary[:500]))
+
+
+def _request_user_id(request: Request) -> int | None:
+    user = getattr(request.state, "user", None)
+    return user.id if user else None
 
 
 async def ensure_builtin_icons(db: AsyncSession):
@@ -82,15 +91,36 @@ def _db_read(item: DatabaseConnection) -> DatabaseConnectionRead:
     return DatabaseConnectionRead.model_validate(item, from_attributes=True).model_copy(update={"password_configured": bool(item.encrypted_password)})
 
 
+def _is_active_database(item: DatabaseConnection) -> bool:
+    try:
+        configured = make_url(build_database_url(item))
+        active = make_url(database.active_database_url)
+        return (
+            configured.drivername, configured.username, (configured.host or "").lower(),
+            configured.port, configured.database, dict(configured.query),
+        ) == (
+            active.drivername, active.username, (active.host or "").lower(),
+            active.port, active.database, dict(active.query),
+        )
+    except Exception:
+        return False
+
+
 @router.get("/databases", response_model=list[DatabaseConnectionRead])
 async def list_databases(db: AsyncSession = Depends(get_db)):
     return [_db_read(x) for x in (await db.execute(select(DatabaseConnection).order_by(DatabaseConnection.name))).scalars()]
 
 
 @router.get("/database-runtime")
-async def database_runtime():
+async def database_runtime(db: AsyncSession = Depends(get_db)):
     if database.active_database_metadata:
-        return {"mode": "CONFIGURED", **database.active_database_metadata, "restart_pending": False}
+        metadata = dict(database.active_database_metadata)
+        if metadata.get("connection_id") is None:
+            connections = (await db.execute(select(DatabaseConnection))).scalars().all()
+            match = next((item for item in connections if _is_active_database(item)), None)
+            if match:
+                metadata.update({"connection_id": match.id, "name": match.name, "database_type": match.database_type})
+        return {"mode": "CONFIGURED", **metadata, "restart_pending": False}
     return {"mode": "DEFAULT", "connection_id": None, "name": "SQLite local",
         "database_type": "SQLITE" if database.active_database_url.startswith("sqlite") else "ENVIRONMENT",
         "activated_at": None, "restart_pending": False}
@@ -99,7 +129,7 @@ async def database_runtime():
 @router.post("/database-runtime/rollback")
 async def rollback_database_runtime():
     from app.config import get_settings
-    settings = get_settings(); previous = get_previous_database(settings.SECRET_KEY)
+    settings = get_app_settings(); previous = get_previous_database(settings.SECRET_KEY)
     if not previous: raise HTTPException(404, "No previous database is available")
     try: await asyncio.wait_for(validate_database_url(previous[0]), timeout=10)
     except Exception as exc: raise HTTPException(409, "Previous database could not be reached or authenticated") from exc
@@ -111,13 +141,20 @@ async def activate_database(item_id: int, db: AsyncSession = Depends(get_db)):
     item = await db.get(DatabaseConnection, item_id)
     if not item: raise HTTPException(404, "Database connection not found")
     if not item.enabled: raise HTTPException(400, "Enable the connection before making it primary")
+    if _is_active_database(item): raise HTTPException(409, "This connection is already the active primary database")
+    if database.migration_in_progress: raise HTTPException(409, "Another database migration is already in progress")
+    from app.services.monitoring_engine import monitoring_engine
     try:
         await _test_database(item)
         await _audit(db, "MIGRATION_STARTED", "DATABASE", item.id, f"Migration to {item.name} started")
         await db.commit()
+        database.migration_in_progress = True
+        await monitoring_engine.stop_and_wait()
         result = await migrate_and_activate(database.engine, item)
         return result
     except Exception as exc:
+        database.migration_in_progress = False
+        monitoring_engine.start()
         safe_reason = "The target is unavailable, not empty, lacks a compatible driver, or migration validation failed."
         await _audit(db, "MIGRATION_FAILED", "DATABASE", item.id, f"Migration to {item.name} failed")
         await db.commit()
@@ -145,6 +182,7 @@ async def update_database(item_id: int, data: DatabaseConnectionInput, db: Async
 async def delete_database(item_id: int, db: AsyncSession = Depends(get_db)):
     item = await db.get(DatabaseConnection, item_id)
     if not item: raise HTTPException(404, "Database connection not found")
+    if _is_active_database(item): raise HTTPException(409, "The active primary database connection cannot be deleted")
     await _audit(db, "DELETE", "DATABASE", item.id, f"Database connection {item.name} deleted"); await db.delete(item)
 
 
@@ -202,14 +240,45 @@ async def test_data_source(item_id: int, db: AsyncSession = Depends(get_db)):
 
 def _integration_read(item: NotificationIntegration) -> NotificationIntegrationRead:
     secrets = json.loads(decrypt_secret(item.encrypted_secrets) or "{}")
+    config = item.public_config or {}
+    last_status, last_error = item.last_status, item.last_error
+    if item.enabled:
+        try:
+            validate_integration(item.provider, config, secrets)
+        except ValueError as exc:
+            last_status, last_error = "FAILED", str(exc)
     return NotificationIntegrationRead(id=item.id, provider=item.provider, name=item.name, enabled=item.enabled,
-        config=item.public_config or {}, secrets_configured=sorted(k for k, v in secrets.items() if v),
-        last_status=item.last_status, last_error=item.last_error, last_tested_at=item.last_tested_at)
+        config=config, secrets_configured=sorted(k for k, v in secrets.items() if v),
+        last_status=last_status, last_error=last_error, last_tested_at=item.last_tested_at)
 
 
 @router.get("/notifications", response_model=list[NotificationIntegrationRead])
 async def list_notifications(db: AsyncSession = Depends(get_db)):
-    return [_integration_read(x) for x in (await db.execute(select(NotificationIntegration).order_by(NotificationIntegration.provider))).scalars()]
+    items = (await db.execute(select(NotificationIntegration).order_by(NotificationIntegration.provider))).scalars().all()
+    result = [_integration_read(item) for item in items]
+    if not any(item.provider == "EMAIL" for item in items):
+        settings = get_app_settings()
+        if settings.SMTP_HOST:
+            result.append(NotificationIntegrationRead(
+                id=0,
+                provider="EMAIL",
+                name="SMTP Email (server environment)",
+                enabled=True,
+                config={
+                    "smtp_server": settings.SMTP_HOST,
+                    "smtp_port": settings.SMTP_PORT,
+                    "username": settings.SMTP_USER,
+                    "from_address": settings.SMTP_FROM,
+                    "recipients": settings.email_recipients,
+                    "tls": settings.SMTP_PORT == 587,
+                    "ssl": settings.SMTP_PORT == 465,
+                },
+                secrets_configured=["password"] if settings.SMTP_PASSWORD else [],
+                last_status="UNTESTED",
+                last_error=None,
+                last_tested_at=None,
+            ))
+    return result
 
 
 @router.put("/notifications/{provider}", response_model=NotificationIntegrationRead)
@@ -218,7 +287,14 @@ async def save_notification(provider: str, data: NotificationIntegrationInput, d
     if provider != data.provider: raise HTTPException(400, "Provider path and payload do not match")
     item = (await db.execute(select(NotificationIntegration).where(NotificationIntegration.provider == provider))).scalar_one_or_none()
     if not item: item = NotificationIntegration(provider=provider, name=data.name); db.add(item)
-    existing = json.loads(decrypt_secret(item.encrypted_secrets) or "{}")
+    decrypted = decrypt_secret(item.encrypted_secrets)
+    if item.encrypted_secrets and decrypted is None:
+        raise HTTPException(409, "Stored credentials cannot be decrypted. Verify SECRET_KEY before saving this integration.")
+    existing = json.loads(decrypted or "{}")
+    if provider == "EMAIL" and not existing.get("password") and not data.secrets.get("password"):
+        environment_password = get_app_settings().SMTP_PASSWORD
+        if environment_password:
+            existing["password"] = environment_password
     existing.update({k: v for k, v in data.secrets.items() if v})
     config = dict(data.config)
     if provider == "TELEGRAM" and config.get("chat_ids"):
@@ -252,13 +328,18 @@ async def _send_notification_test(item: NotificationIntegration):
 
 @router.post("/notifications/{provider}/test")
 async def test_notification(provider: str, db: AsyncSession = Depends(get_db)):
-    item = (await db.execute(select(NotificationIntegration).where(NotificationIntegration.provider == provider.upper()))).scalar_one_or_none()
+    normalized_provider = provider.upper()
+    item = (await db.execute(select(NotificationIntegration).where(NotificationIntegration.provider == normalized_provider))).scalar_one_or_none()
+    persisted = item is not None
+    if not item and normalized_provider == "EMAIL":
+        item = environment_email_integration()
     if not item: raise HTTPException(404, "Notification integration not found")
     try:
         await _send_notification_test(item); item.last_status = "SUCCESS"; item.last_error = None
     except Exception as exc:
         item.last_status = "FAILED"; item.last_error = safe_delivery_error(exc)
-    item.last_tested_at = datetime.now(timezone.utc); await _audit(db, "TEST", "NOTIFICATION", item.id, f"{item.provider} test: {item.last_status}")
+    item.last_tested_at = datetime.now(timezone.utc)
+    await _audit(db, "TEST", "NOTIFICATION", item.id if persisted else None, f"{item.provider} test: {item.last_status}")
     return {"status": item.last_status, "message": item.last_error or "Test notification sent."}
 
 
@@ -320,32 +401,41 @@ async def save_layout(data: TopologyLayoutInput, db: AsyncSession = Depends(get_
 
 
 @router.get("/topology-layout/snapshots")
-async def list_topology_snapshots(db: AsyncSession = Depends(get_db)):
-    rows = (await db.execute(select(TopologySnapshot).order_by(TopologySnapshot.updated_at.desc()))).scalars().all()
+async def list_topology_snapshots(request: Request, db: AsyncSession = Depends(get_db)):
+    owner_id = _request_user_id(request)
+    rows = (await db.execute(select(TopologySnapshot).where(
+        TopologySnapshot.user_id == owner_id
+    ).order_by(TopologySnapshot.updated_at.desc()))).scalars().all()
     return [{"id": row.id, "name": row.name, "layout_mode": row.layout_mode,
         "positions": row.positions or [], "viewport": row.viewport or {},
         "created_at": row.created_at, "updated_at": row.updated_at} for row in rows]
 
 
 @router.post("/topology-layout/snapshots", status_code=201)
-async def save_topology_snapshot(data: TopologySnapshotInput, db: AsyncSession = Depends(get_db)):
-    item = (await db.execute(select(TopologySnapshot).where(TopologySnapshot.name == data.name))).scalar_one_or_none()
+async def save_topology_snapshot(data: TopologySnapshotInput, request: Request, db: AsyncSession = Depends(get_db)):
+    owner_id = _request_user_id(request)
+    item = (await db.execute(select(TopologySnapshot).where(
+        TopologySnapshot.user_id == owner_id, TopologySnapshot.name == data.name
+    ))).scalar_one_or_none()
     positions = [position.model_dump() for position in data.positions]
     if item:
         item.layout_mode, item.positions, item.viewport = data.layout_mode, positions, data.viewport
     else:
-        item = TopologySnapshot(name=data.name, layout_mode=data.layout_mode, positions=positions, viewport=data.viewport); db.add(item)
+        item = TopologySnapshot(user_id=owner_id, name=data.name, layout_mode=data.layout_mode, positions=positions, viewport=data.viewport); db.add(item)
     await db.flush(); await _audit(db, "UPSERT", "TOPOLOGY_SNAPSHOT", item.id, f"Topology view {item.name} saved")
     return {"id": item.id, "name": item.name, "layout_mode": item.layout_mode,
         "positions": item.positions, "viewport": item.viewport}
 
 
 @router.put("/topology-layout/snapshots/{snapshot_id}")
-async def update_topology_snapshot(snapshot_id: int, data: TopologySnapshotInput, db: AsyncSession = Depends(get_db)):
-    item = await db.get(TopologySnapshot, snapshot_id)
+async def update_topology_snapshot(snapshot_id: int, data: TopologySnapshotInput, request: Request, db: AsyncSession = Depends(get_db)):
+    owner_id = _request_user_id(request)
+    item = (await db.execute(select(TopologySnapshot).where(
+        TopologySnapshot.id == snapshot_id, TopologySnapshot.user_id == owner_id
+    ))).scalar_one_or_none()
     if not item: raise HTTPException(404, "Topology view not found")
     duplicate = (await db.execute(select(TopologySnapshot).where(
-        TopologySnapshot.name == data.name, TopologySnapshot.id != snapshot_id,
+        TopologySnapshot.user_id == owner_id, TopologySnapshot.name == data.name, TopologySnapshot.id != snapshot_id,
     ))).scalar_one_or_none()
     if duplicate: raise HTTPException(409, "Another topology view already uses this name")
     item.name = data.name
@@ -359,22 +449,25 @@ async def update_topology_snapshot(snapshot_id: int, data: TopologySnapshotInput
 
 
 @router.post("/topology-layout/snapshots/{snapshot_id}/restore")
-async def restore_topology_snapshot(snapshot_id: int, db: AsyncSession = Depends(get_db)):
-    item = await db.get(TopologySnapshot, snapshot_id)
+async def restore_topology_snapshot(snapshot_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    owner_id = _request_user_id(request)
+    item = (await db.execute(select(TopologySnapshot).where(
+        TopologySnapshot.id == snapshot_id, TopologySnapshot.user_id == owner_id
+    ))).scalar_one_or_none()
     if not item: raise HTTPException(404, "Topology view not found")
     valid_devices = set((await db.execute(select(Device.id))).scalars().all())
     positions = [position for position in (item.positions or []) if position.get("device_id") in valid_devices]
-    await db.execute(delete(TopologyPosition))
-    db.add_all([TopologyPosition(device_id=position["device_id"], x=position["x"], y=position["y"], layout_mode=item.layout_mode) for position in positions])
-    setting = await db.get(SystemSetting, "topology") or SystemSetting(key="topology"); setting.value = {"layout_mode": item.layout_mode}; db.add(setting)
     await _audit(db, "RESTORE", "TOPOLOGY_SNAPSHOT", item.id, f"Topology view {item.name} restored")
     return {"id": item.id, "name": item.name, "layout_mode": item.layout_mode,
         "positions": positions, "viewport": item.viewport or {}}
 
 
 @router.delete("/topology-layout/snapshots/{snapshot_id}", status_code=204)
-async def delete_topology_snapshot(snapshot_id: int, db: AsyncSession = Depends(get_db)):
-    item = await db.get(TopologySnapshot, snapshot_id)
+async def delete_topology_snapshot(snapshot_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    owner_id = _request_user_id(request)
+    item = (await db.execute(select(TopologySnapshot).where(
+        TopologySnapshot.id == snapshot_id, TopologySnapshot.user_id == owner_id
+    ))).scalar_one_or_none()
     if not item: raise HTTPException(404, "Topology view not found")
     await _audit(db, "DELETE", "TOPOLOGY_SNAPSHOT", item.id, f"Topology view {item.name} deleted"); await db.delete(item)
 
@@ -401,8 +494,9 @@ async def audit_logs(limit: int = 100, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/configuration/export")
-async def export_configuration(db: AsyncSession = Depends(get_db)):
-    devices = (await db.execute(select(Device))).scalars().all(); interfaces = (await db.execute(select(Interface))).scalars().all(); links = (await db.execute(select(Link))).scalars().all(); icons = (await db.execute(select(IconAsset))).scalars().all(); rules = (await db.execute(select(NotificationRule))).scalars().all(); settings = (await db.execute(select(SystemSetting))).scalars().all(); positions = (await db.execute(select(TopologyPosition))).scalars().all(); snapshots = (await db.execute(select(TopologySnapshot))).scalars().all(); redundancy = (await db.execute(select(RedundancyGroup))).scalars().all()
+async def export_configuration(request: Request, db: AsyncSession = Depends(get_db)):
+    owner_id = _request_user_id(request)
+    devices = (await db.execute(select(Device))).scalars().all(); interfaces = (await db.execute(select(Interface))).scalars().all(); links = (await db.execute(select(Link))).scalars().all(); icons = (await db.execute(select(IconAsset))).scalars().all(); rules = (await db.execute(select(NotificationRule))).scalars().all(); settings = (await db.execute(select(SystemSetting))).scalars().all(); positions = (await db.execute(select(TopologyPosition))).scalars().all(); snapshots = (await db.execute(select(TopologySnapshot).where(TopologySnapshot.user_id == owner_id))).scalars().all(); redundancy = (await db.execute(select(RedundancyGroup))).scalars().all()
     def clean(obj, excluded=()):
         return {c.name: getattr(obj, c.name) for c in obj.__table__.columns if c.name not in excluded}
     return {"format": "netmonitor-config", "version": 1, "exported_at": datetime.now(timezone.utc),
@@ -410,12 +504,13 @@ async def export_configuration(db: AsyncSession = Depends(get_db)):
         "interfaces": [clean(x) for x in interfaces], "links": [clean(x) for x in links],
         "redundancy_groups": [clean(x) for x in redundancy], "notification_rules": [clean(x) for x in rules],
         "settings": [clean(x) for x in settings], "topology_positions": [clean(x) for x in positions],
-        "topology_snapshots": [clean(x) for x in snapshots],
+        "topology_snapshots": [clean(x, ("user_id",)) for x in snapshots],
         "credentials_included": False}
 
 
 @router.post("/configuration/import")
-async def import_configuration(payload: dict, db: AsyncSession = Depends(get_db)):
+async def import_configuration(payload: dict, request: Request, db: AsyncSession = Depends(get_db)):
+    owner_id = _request_user_id(request)
     if payload.get("format") != "netmonitor-config" or payload.get("version") != 1: raise HTTPException(400, "Unsupported configuration backup")
     counts = {}; device_map = {}; interface_map = {}; link_map = {}; icon_map = {}
 
@@ -503,10 +598,12 @@ async def import_configuration(payload: dict, db: AsyncSession = Depends(get_db)
         else: db.add(TopologyPosition(**values))
     counts["topology_positions"] = len(payload.get("topology_positions", []))
     for raw in payload.get("topology_snapshots", []):
-        existing = (await db.execute(select(TopologySnapshot).where(TopologySnapshot.name == raw.get("name")))).scalar_one_or_none()
+        existing = (await db.execute(select(TopologySnapshot).where(
+            TopologySnapshot.user_id == owner_id, TopologySnapshot.name == raw.get("name")
+        ))).scalar_one_or_none()
         remapped_positions = [{**position, "device_id": device_map.get(position.get("device_id"))}
             for position in raw.get("positions", []) if device_map.get(position.get("device_id"))]
-        values = fields(TopologySnapshot, raw); values["positions"] = remapped_positions
+        values = fields(TopologySnapshot, raw, ("user_id",)); values["positions"] = remapped_positions; values["user_id"] = owner_id
         if existing:
             for key, value in values.items(): setattr(existing, key, value)
         else: db.add(TopologySnapshot(**values))

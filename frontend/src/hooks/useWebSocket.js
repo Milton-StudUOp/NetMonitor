@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { getAuthToken } from '../api/client';
 
-export function useWebSocket(onEvent) {
+export function useWebSocket(onEvent, enabled = true) {
   const [isConnected, setIsConnected] = useState(false);
   const wsRef = useRef(null);
   const onEventRef = useRef(onEvent);
@@ -14,9 +15,11 @@ export function useWebSocket(onEvent) {
     let disposed = false;
 
     const connect = () => {
-      if (disposed) return;
+      if (disposed || !enabled) return;
 
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const token = getAuthToken();
+      if (!token) return;
       const wsUrl = `${protocol}//${window.location.host}/ws/monitoring`;
 
       const ws = new WebSocket(wsUrl);
@@ -26,18 +29,20 @@ export function useWebSocket(onEvent) {
           ws.close(1000, 'Component unmounted');
           return;
         }
-        setIsConnected(true);
+        ws.send(JSON.stringify({ type: 'authenticate', token }));
       };
 
       ws.onmessage = (event) => {
         try {
           const parsed = JSON.parse(event.data);
+          if (parsed.event === 'authenticated') {
+            setIsConnected(true);
+            return;
+          }
           if (onEventRef.current) {
             onEventRef.current(parsed);
           }
-        } catch (err) {
-          console.error('Failed to parse WS message', err);
-        }
+        } catch {}
       };
 
       ws.onclose = () => {
@@ -47,10 +52,7 @@ export function useWebSocket(onEvent) {
         }
       };
 
-      ws.onerror = (err) => {
-        console.error('WS Error:', err);
-        ws.close();
-      };
+      ws.onerror = () => ws.close();
 
       wsRef.current = ws;
     };
@@ -64,7 +66,7 @@ export function useWebSocket(onEvent) {
         wsRef.current.close(1000, 'Component unmounted');
       }
     };
-  }, []);
+  }, [enabled]);
 
   return { isConnected };
 }

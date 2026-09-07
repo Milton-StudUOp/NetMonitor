@@ -2,13 +2,16 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Ban, CheckSquare, Download, Radar, Search } from 'lucide-react';
 import api from '../api/client';
 import { getApiErrorMessage } from '../utils/errors';
+import Pagination from '../components/Pagination';
 
 const terminalStates = new Set(['COMPLETED', 'CANCELLED', 'FAILED']);
 const stageLabels = { HOST_DISCOVERY: 'Discovering active hosts', PORT_SCAN: 'Scanning ports on active hosts', FINALIZING: 'Finalizing results', COMPLETED: 'Completed', CANCELLED: 'Cancelled', FAILED: 'Failed' };
 const formatElapsed = (seconds = 0) => `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
+const PAGE_SIZE = 25;
 
-export default function Discovery() {
-  const [target, setTarget] = useState('192.168.1.0/24');
+export default function Discovery({ user }) {
+  const canAddDevices = user?.role !== 'VIEWER';
+  const [target, setTarget] = useState('');
   const [portMode, setPortMode] = useState('NONE');
   const [ports, setPorts] = useState('');
   const [profile, setProfile] = useState('SAFE');
@@ -18,11 +21,13 @@ export default function Discovery() {
   const [snmpV3, setSnmpV3] = useState({ username: '', auth_key: '', priv_key: '' });
   const [results, setResults] = useState([]);
   const [selected, setSelected] = useState(new Set());
+  const [page, setPage] = useState(1);
   const [job, setJob] = useState(null);
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
   const [message, setMessage] = useState(null);
   const timer = useRef(null);
+  const visibleResults = results.map((item, index) => ({ item, index })).slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   useEffect(() => () => clearTimeout(timer.current), []);
   const toggleMethod = (method) => setMethods(old => old.includes(method) ? old.filter(x => x !== method) : [...old, method]);
@@ -79,7 +84,7 @@ export default function Discovery() {
     finally { setImporting(false); }
   };
 
-  return <div>
+  return <div className="data-page">
     <div className="page-title"><div><h2>Network Discovery</h2><p>Discover hosts first, enrich their identity, then optionally scan TCP ports.</p></div></div>
     <form className={`glass-card platform-form discovery-form ${portMode === 'CUSTOM' ? 'has-custom-ports' : ''}`} onSubmit={scan}>
       <div className="form-group discovery-target"><label className="form-label">IP, CIDR, or range *</label><input className="form-input" value={target} onChange={e => setTarget(e.target.value)} required disabled={loading} /></div>
@@ -93,8 +98,8 @@ export default function Discovery() {
     {profile === 'AGGRESSIVE' && <div className="notice warning">Aggressive mode is intended for controlled environments and must be enabled by a server administrator.</div>}
     {job && <div className="glass-card discovery-progress" aria-live="polite"><div className="progress-heading"><strong>{stageLabels[job.stage] || job.stage}</strong><span>{job.progress_percent}%</span></div><div className="progress-track" role="progressbar" aria-label="Discovery progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow={job.progress_percent}><div className={job.status === 'RUNNING' && job.progress_percent === 0 ? 'is-indeterminate' : ''} style={job.progress_percent > 0 ? { width: `${job.progress_percent}%` } : undefined} /></div><div className="progress-stats"><span>Hosts checked <strong>{job.hosts_processed}/{job.total_hosts}</strong></span><span>Hosts found <strong>{job.hosts_found}</strong></span><span>Ports scanned <strong>{job.ports_scanned}/{job.total_port_checks}</strong></span><span>Elapsed <strong>{formatElapsed(job.elapsed_seconds)}</strong></span></div></div>}
     {message && <div className={`notice ${message.type}`}>{message.text}</div>}
-    <div className="glass-card" style={{ overflow: 'auto' }}>
-      {!results.length ? <div className="empty-platform"><Search size={40} /><strong>{loading ? 'Discovery in progress' : 'No discovery results'}</strong><span>Only active hosts will be included in the results.</span></div> : <><div className="table-toolbar"><span>{selected.size} of {results.length} selected</span><button type="button" className="btn btn-primary" disabled={!selected.size || loading || importing} onClick={importSelected}><Download size={16} /> {importing ? 'Adding…' : 'Add Selected Devices'}</button></div><table className="custom-table"><thead><tr><th><input type="checkbox" aria-label="Select all discovered devices" checked={selected.size === results.length} onChange={() => setSelected(selected.size === results.length ? new Set() : new Set(results.map((_, index) => index)))} /></th><th>Host / IP</th><th>Editable Name</th><th>Type</th><th>SNMP</th><th>Location / Group</th><th>Response</th><th>Open TCP Ports</th></tr></thead><tbody>{results.map((item, index) => <tr key={item.ip_address}><td><input type="checkbox" checked={selected.has(index)} onChange={() => setSelected(old => { const next = new Set(old); next.has(index) ? next.delete(index) : next.add(index); return next; })} /></td><td><strong>{item.hostname || item.ip_address}</strong><div>{item.ip_address} <span className="badge badge-online">{item.status}</span></div></td><td><input className="form-input compact" value={item.name} onChange={e => update(index, 'name', e.target.value)} /></td><td><select className="form-select compact" value={item.device_type} onChange={e => update(index, 'device_type', e.target.value)}>{['SWITCH', 'ROUTER', 'FIREWALL', 'SERVER', 'ACCESS_POINT', 'RADIO', 'OTHER'].map(value => <option key={value}>{value}</option>)}</select></td><td>{item.snmp_available ? <span className="badge badge-online">Available</span> : 'Not detected'}</td><td><input className="form-input compact" value={item.location} onChange={e => update(index, 'location', e.target.value)} /><input className="form-input compact" placeholder="Group" value={item.group_name} onChange={e => update(index, 'group_name', e.target.value)} /></td><td>{item.latency_ms != null ? `${item.latency_ms} ms` : '—'}</td><td>{item.open_ports.join(', ') || 'None detected'}</td></tr>)}</tbody></table></>}
+    <div className="glass-card data-grid-card">
+      {!results.length ? <div className="empty-platform"><Search size={40} /><strong>{loading ? 'Discovery in progress' : 'No discovery results'}</strong><span>Only active hosts will be included in the results.</span></div> : <><div className="table-toolbar"><span>{canAddDevices ? `${selected.size} of ${results.length} selected` : `${results.length} discovered device(s)`}</span>{canAddDevices&&<button type="button" className="btn btn-primary" disabled={!selected.size || loading || importing} onClick={importSelected}><Download size={16} /> {importing ? 'Adding…' : 'Add Selected Devices'}</button>}</div><table className="custom-table"><thead><tr>{canAddDevices&&<th><input type="checkbox" aria-label="Select all discovered devices" checked={selected.size === results.length} onChange={() => setSelected(selected.size === results.length ? new Set() : new Set(results.map((_, index) => index)))} /></th>}<th>Host / IP</th><th>Editable Name</th><th>Type</th><th>SNMP</th><th>Location / Group</th><th>Response</th><th>Open TCP Ports</th></tr></thead><tbody>{results.map((item, index) => <tr key={item.ip_address}>{canAddDevices&&<td><input type="checkbox" checked={selected.has(index)} onChange={() => setSelected(old => { const next = new Set(old); next.has(index) ? next.delete(index) : next.add(index); return next; })} /></td>}<td><strong>{item.hostname || item.ip_address}</strong><div>{item.ip_address} <span className="badge badge-online">{item.status}</span></div></td><td><input className="form-input compact" disabled={!canAddDevices} value={item.name} onChange={e => update(index, 'name', e.target.value)} /></td><td><select className="form-select compact" disabled={!canAddDevices} value={item.device_type} onChange={e => update(index, 'device_type', e.target.value)}>{['SWITCH', 'ROUTER', 'FIREWALL', 'SERVER', 'ACCESS_POINT', 'RADIO', 'OTHER'].map(value => <option key={value}>{value}</option>)}</select></td><td>{item.snmp_available ? <span className="badge badge-online">Available</span> : 'Not detected'}</td><td><input className="form-input compact" disabled={!canAddDevices} value={item.location} onChange={e => update(index, 'location', e.target.value)} /><input className="form-input compact" disabled={!canAddDevices} placeholder="Group" value={item.group_name} onChange={e => update(index, 'group_name', e.target.value)} /></td><td>{item.latency_ms != null ? `${item.latency_ms} ms` : '—'}</td><td>{item.open_ports.join(', ') || 'None detected'}</td></tr>)}</tbody></table></>}
     </div>
   </div>;
 }

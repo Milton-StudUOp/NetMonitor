@@ -90,7 +90,6 @@ async def evaluate_redundancy_group(group_id: int, db: AsyncSession) -> Redundan
 
     logger.info(
         "redundancy_group_status_change",
-        group_name=group.name,
         old_status=old_status,
         new_status=new_status,
     )

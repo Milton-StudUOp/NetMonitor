@@ -17,7 +17,7 @@ OID_IF_OUT_ERRORS = "1.3.6.1.2.1.2.2.1.20"
 async def query_snmp_interface(
     ip_address: str,
     snmp_index: int,
-    community: str = "public",
+    community: str,
     port: int = 161,
 ) -> Dict:
     """
@@ -66,7 +66,7 @@ async def query_snmp_interface(
         }
 
     except Exception as e:
-        logger.debug("snmp_query_fallback", ip=ip_address, index=snmp_index, error=str(e))
+        logger.debug("snmp_query_fallback", error_type=type(e).__name__)
         # Simulated fallback for development/demo when SNMP target not reachable
         return {
             "is_up": False,

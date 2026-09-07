@@ -10,12 +10,33 @@ from urllib.parse import urlparse
 
 import httpx
 
+from app.config import get_settings
 from app.models.platform import NotificationIntegration
-from app.security import decrypt_secret
+from app.security import decrypt_secret, encrypt_secret
+from app.services.tls import verified_tls_context
 
 
 class NotificationConfigurationError(ValueError):
     """Raised when an integration is incomplete or internally inconsistent."""
+
+
+def environment_email_integration() -> NotificationIntegration | None:
+    """Build a non-persisted EMAIL integration from server settings."""
+    settings = get_settings()
+    if not settings.SMTP_HOST or not settings.SMTP_FROM:
+        return None
+    item = NotificationIntegration(provider="EMAIL", name="SMTP Email (server environment)", enabled=True)
+    item.public_config = {
+        "smtp_server": settings.SMTP_HOST,
+        "smtp_port": settings.SMTP_PORT,
+        "username": settings.SMTP_USER,
+        "from_address": settings.SMTP_FROM,
+        "recipients": settings.email_recipients,
+        "tls": settings.SMTP_PORT == 587,
+        "ssl": settings.SMTP_PORT == 465,
+    }
+    item.encrypted_secrets = encrypt_secret(json.dumps({"password": settings.SMTP_PASSWORD}))
+    return item
 
 
 def integration_credentials(item: NotificationIntegration) -> tuple[dict, dict]:
@@ -157,6 +178,13 @@ async def send_notification(
     additional_recipients: list[str] | None = None, context: dict | None = None,
 ) -> None:
     config, secrets = integration_credentials(item)
+    config = dict(config)
+    if item.provider == "TELEGRAM":
+        config["chat_ids"] = recipient_targets("TELEGRAM", config, additional_recipients)
+    elif item.provider == "WHATSAPP":
+        config["recipients"] = recipient_targets("WHATSAPP", config, additional_recipients)
+    else:
+        config["recipients"] = recipient_targets("EMAIL", config, additional_recipients)
     validate_integration(item.provider, config, secrets)
     content = build_notification_content(title, message, severity, context)
     text = content["plain"]
@@ -196,10 +224,10 @@ async def send_notification(
         smtp_class = smtplib.SMTP_SSL if config.get("ssl") else smtplib.SMTP
         smtp_kwargs = {"timeout": 10}
         if config.get("ssl"):
-            smtp_kwargs["context"] = ssl.create_default_context()
+            smtp_kwargs["context"] = verified_tls_context()
         with smtp_class(config["smtp_server"], int(config.get("smtp_port", 587)), **smtp_kwargs) as smtp:
             if config.get("tls") and not config.get("ssl"):
-                smtp.starttls(context=ssl.create_default_context())
+                smtp.starttls(context=verified_tls_context())
             if config.get("username"):
                 smtp.login(config["username"], secrets["password"])
             smtp.send_message(mail)

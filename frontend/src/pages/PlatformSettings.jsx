@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Bell, Database, Download, Image, Plus, Save, Settings, TestTube, Trash2, Upload } from 'lucide-react';
+import { Bell, Database, Download, Image, Plus, Save, Settings, TestTube, Trash2, Upload, Users } from 'lucide-react';
 import api from '../api/client';
 import { getApiErrorMessage } from '../utils/errors';
 import NotificationSettings from '../components/NotificationSettings';
+import AccountUsers from '../components/UserManagement';
 
 const databaseBlank = { name: '', database_type: 'POSTGRESQL', host: '', port: 5432, database_name: '', username: '', password: '', ssl_enabled: false, enabled: true };
 const databaseDefaultPorts = { POSTGRESQL: 5432, MYSQL: 3306, MSSQL: 1433, ORACLE: 1521, SQLITE: null };
@@ -10,7 +11,7 @@ const databaseDefaultPorts = { POSTGRESQL: 5432, MYSQL: 3306, MSSQL: 1433, ORACL
 export default function PlatformSettings() {
   const [tab, setTab] = useState('databases');
   const [notice, setNotice] = useState(null);
-  const tabs = [['databases', Database, 'Databases'], ['notifications', Bell, 'Notifications'], ['icons', Image, 'Icons'], ['general', Settings, 'System & Backup']];
+  const tabs = [['databases', Database, 'Databases'], ['notifications', Bell, 'Notifications'], ['users', Users, 'Users'], ['icons', Image, 'Icons'], ['general', Settings, 'System & Backup']];
   const report = (type, text) => setNotice({ type, text });
   return <div>
     <div className="page-title"><div><h2>Configuration and Integrations</h2><p>Persistent settings, protected credentials, and controlled tests.</p></div></div>
@@ -18,6 +19,7 @@ export default function PlatformSettings() {
     {notice && <div className={`notice ${notice.type}`}>{notice.text}</div>}
     {tab === 'databases' && <Databases report={report} />}
     {tab === 'notifications' && <NotificationSettings report={report} />}
+    {tab === 'users' && <AccountUsers report={report} />}
     {tab === 'icons' && <Icons report={report} />}
     {tab === 'general' && <General report={report} />}
   </div>;

@@ -2,8 +2,9 @@ from pathlib import Path
 from urllib.parse import quote_plus
 
 from sqlalchemy import BigInteger, Integer, text
-from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.database import _create_engine
 from app.models.platform import DatabaseConnection
 from app.security import decrypt_secret
 
@@ -46,7 +47,7 @@ def limited_query(database_type: str, query: str) -> str:
 
 
 async def test_authenticated_connection(item: DatabaseConnection) -> None:
-    engine = create_async_engine(build_database_url(item), pool_pre_ping=True)
+    engine = _create_engine(build_database_url(item))
     try:
         async with engine.connect() as connection:
             await connection.execute(text(validation_query(item.database_type)))
@@ -55,7 +56,7 @@ async def test_authenticated_connection(item: DatabaseConnection) -> None:
 
 
 async def validate_database_url(url: str) -> None:
-    engine = create_async_engine(url, pool_pre_ping=True)
+    engine = _create_engine(url)
     try:
         async with engine.connect() as connection:
             database_type = "ORACLE" if connection.dialect.name == "oracle" else "OTHER"
@@ -65,7 +66,7 @@ async def validate_database_url(url: str) -> None:
 
 
 async def execute_read_only(item: DatabaseConnection, query: str, parameters: dict) -> list[dict]:
-    engine = create_async_engine(build_database_url(item), pool_pre_ping=True)
+    engine = _create_engine(build_database_url(item))
     try:
         async with engine.connect() as connection:
             result = await connection.execute(text(limited_query(item.database_type, query)), parameters or {})
@@ -109,7 +110,9 @@ async def synchronize_generated_keys(connection: AsyncConnection, database_type:
                 "SELECT setval(pg_get_serial_sequence(:table_name, :column_name), :maximum, :has_rows)"
             ), {"table_name": table.name, "column_name": pk.name, "maximum": max(maximum, 1), "has_rows": maximum > 0})
         elif database_type == "MYSQL":
-            await connection.exec_driver_sql(f"ALTER TABLE `{table.name}` AUTO_INCREMENT = {next_value}")
+            # InnoDB advances AUTO_INCREMENT automatically when explicit IDs
+            # are inserted. ALTER TABLE would implicitly commit the migration.
+            continue
         elif database_type == "MSSQL":
             await connection.exec_driver_sql(f"DBCC CHECKIDENT ('{table.name}', RESEED, {maximum})")
         elif database_type == "ORACLE":

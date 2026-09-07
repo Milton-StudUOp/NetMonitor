@@ -1,5 +1,5 @@
 import React from 'react';
-import { AlertTriangle, AlertCircle, Info, CheckCircle2 } from 'lucide-react';
+import { AlertTriangle, AlertCircle, Info, CheckCircle2, Clock3 } from 'lucide-react';
 
 export default function AlertBanner({ alert, onResolve }) {
   if (!alert) return null;
@@ -32,13 +32,14 @@ export default function AlertBanner({ alert, onResolve }) {
           <h4 style={{ color: '#fff', fontSize: '0.95rem', fontWeight: 600 }}>
             {alert.title}
           </h4>
-          <span className={`badge badge-${alert.severity.toLowerCase()}`}>
-            {alert.severity}
+          <span className={`badge badge-${(alert.severity || 'INFORMATION').toLowerCase()}`}>
+            {alert.severity || 'INFORMATION'}
           </span>
         </div>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', lineHeight: 1.5 }}>
           {alert.message}
         </p>
+        <div className="alert-dates"><span><Clock3 size={13}/> Triggered {alert.created_at ? new Date(alert.created_at).toLocaleString() : 'at an unknown time'}</span>{alert.resolved_at && <span><CheckCircle2 size={13}/> Resolved {new Date(alert.resolved_at).toLocaleString()}</span>}</div>
 
         {alert.root_cause && (
           <div style={{
@@ -61,7 +62,7 @@ export default function AlertBanner({ alert, onResolve }) {
           className="btn btn-secondary"
           style={{ fontSize: '0.8rem', padding: '6px 12px' }}
         >
-          <CheckCircle2 size={14} /> Resolvido
+          <CheckCircle2 size={14} /> Resolve
         </button>
       )}
     </div>

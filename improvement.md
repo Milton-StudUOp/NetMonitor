@@ -1,254 +1,321 @@
-### Network Discovery — Optional Ports + Top 100 Ports + Safe Scanning
+# NetMonitor Improvement Roadmap
 
-O Network Discovery está funcionando muito bem. Preciso apenas ajustar e expandir o comportamento atual para tornar o processo mais flexível e seguro para ambientes de produção.
+This document tracks approved improvements and proposals. Implemented items are marked explicitly.
 
-### 1. IP/CIDR/Range deve ser o único campo obrigatório
+## Guiding principles
 
-Atualmente parece que o Discovery exige também a especificação de portas.
+- Remain compatible with SQLite, PostgreSQL, MySQL, SQL Server, and Oracle.
+- Prefer portable SQLAlchemy queries over database-specific SQL.
+- Keep discovery and monitoring traffic safe for production networks.
+- Make operational state understandable without requiring specialist knowledge.
+- Protect credentials, personal data, audit records, and administrative operations.
+- Design high-volume metric storage with retention and aggregation from the beginning.
 
-O comportamento esperado é:
+## Priority 1 — Production foundation
 
-* `IP/CIDR/Range` → obrigatório
-* `Ports` → opcional
+### 1. Authentication and role-based access control
 
-Exemplos válidos:
+Add local authentication initially, with a design that can later support LDAP, Active Directory, or OIDC.
 
-`192.168.1.0/24`
+Suggested roles:
 
-`10.10.10.1-10.10.10.254`
+- **Viewer:** read dashboards, topology, metrics, alerts, and reports.
+- **Operator:** acknowledge incidents, run approved discovery profiles, and manage maintenance windows.
+- **Administrator:** manage users, integrations, databases, retention, templates, and aggressive discovery.
 
-`192.168.10.15`
+Acceptance criteria:
 
-Mesmo sem nenhuma porta especificada, o Discovery deve executar normalmente.
+- Every non-public API requires authentication.
+- Permissions are enforced by the backend, not only hidden in the frontend.
+- Login, logout, failed authentication, and administrative actions are audited.
+- Passwords use a modern adaptive hash and tokens have controlled expiration.
+- A first-administrator bootstrap procedure is documented.
 
----
+### 2. Metric retention and aggregation
 
-### 2. Port Scan Mode
+The `monitoring_results` table will grow rapidly and should not remain an unlimited raw-event table.
 
-Adicionar uma opção:
+Add:
 
-**Port Scan Mode**
+- Configurable raw-data retention.
+- Hourly and daily aggregates.
+- Background cleanup with visible job status.
+- Compound indexes for target, status, and timestamp.
+- Server-side pagination for all historical views.
+- Streaming exports for large reports.
+- Database-aware batch sizes without changing business behavior between engines.
 
-Com três possibilidades:
+Acceptance criteria:
 
-**No Port Scan**
+- Retention runs safely on every supported database.
+- Aggregated reports remain available after raw samples expire.
+- Cleanup never blocks the monitoring loop.
+- Administrators can preview affected record counts before deletion.
 
-* Apenas descoberta dos equipamentos.
-* ICMP/Ping.
-* ARP quando aplicável.
-* SNMP quando configurado.
-* Hostname/DNS quando disponível.
-* Não realizar TCP port scan.
+### 3. NetMonitor self-monitoring
 
-**Top 100 Ports**
+Expose the health of the monitoring platform itself:
 
-* Primeiro descobrir os hosts ativos.
-* Depois executar scan das Top 100 TCP Ports somente nos hosts encontrados.
-* O utilizador não precisa especificar portas manualmente.
+- Database connectivity and query latency.
+- Monitoring-cycle duration and last successful cycle.
+- Number of delayed or failed checks.
+- Notification queue and delivery failures.
+- Discovery jobs and poller load.
+- Database size and metric growth rate.
+- Backend CPU, memory, file descriptors, and disk usage.
 
-**Custom Ports**
+Provide a dedicated **System Health** page and include critical failures in notifications.
 
-* Primeiro descobrir os hosts ativos.
-* Depois realizar scan somente das portas especificadas.
-* Exemplo: `22,80,443,3389`.
+## Priority 2 — Monitoring depth
 
-Quando `Custom Ports` estiver selecionado, mostrar o campo:
+### 4. SNMP performance metrics
 
-`Ports`
+Expand monitoring beyond reachability:
 
-Nos outros modos, esse campo deve ficar oculto ou desabilitado.
+- Device uptime.
+- CPU and memory utilization.
+- Temperature, fan, and power-supply state when supported.
+- Interface administrative and operational state.
+- Interface speed and utilization percentage.
+- Incoming and outgoing traffic.
+- Errors, discards, and packet drops.
+- 95th-percentile bandwidth utilization.
 
----
+Metric names, units, and labels should be centralized and consistent. Counter rollover, device reboot, and 32-bit/64-bit interface counters must be handled correctly.
 
-### 3. Top 100 Ports
+Acceptance criteria:
 
-A lista das Top 100 TCP Ports deve ficar centralizada no backend/configuração do sistema e não hardcoded no frontend.
+- Missing OIDs do not make the entire device check fail.
+- Counter resets do not generate false traffic spikes.
+- Charts clearly identify units and collection gaps.
+- Metric support is visible before a template is assigned.
 
-Isso permitirá atualizar a lista futuramente sem necessidade de alterar a interface.
+### 5. Monitoring templates
 
-O resultado do Discovery deve mostrar, por equipamento:
+Introduce reusable templates similar to mature monitoring platforms.
 
-* Host
-* IP
-* Hostname
-* Device Type, quando identificado
-* SNMP availability
-* Open TCP Ports
-* Response time
-* Status
+Initial templates:
 
-Importante: um equipamento deve continuar sendo considerado **discovered** mesmo que nenhuma porta TCP esteja aberta.
+- Generic ICMP device.
+- Generic SNMP device.
+- Cisco switch/router.
+- MikroTik RouterOS.
+- FortiGate firewall.
+- Ubiquiti access point/radio.
+- Linux server.
+- Windows server.
 
----
+A template should define checks, intervals, retry policy, thresholds, supported metrics, default icon, and notification recommendations. Devices may override individual values without modifying the template.
 
-### 4. Safe Discovery / Network Protection
+### 6. Service and port monitoring
 
-Como o sistema será utilizado em redes de produção, o Top 100 não deve executar um scan agressivo.
+Add explicit service checks independent of discovery:
 
-O fluxo recomendado é:
+- TCP connection.
+- HTTP/HTTPS response, status code, latency, and certificate expiry.
+- DNS resolution.
+- SMTP, IMAP, and database port reachability.
+- Optional content matching.
+- Custom command/plugin interface with strict execution controls.
 
-`IP/CIDR/Range`
-→ `ICMP/ARP/SNMP Discovery`
-→ `Identify Active Hosts`
-→ `TCP Port Scan`
-→ `Results`
+Service failures should appear in device analytics, topology context, alerts, and reports.
 
-Não executar Top 100 contra todos os IPs do range quando não forem necessários.
+## Priority 3 — Incident operations
 
-Por exemplo, em um `/24`, primeiro identificar os hosts ativos e somente depois executar o port scan nesses hosts.
+### 7. Complete incident lifecycle
 
-O scanner deve possuir:
+Extend alerts into operational incidents with:
 
-* Configurable timeout
-* Configurable retry
-* Configurable concurrency
-* Rate limiting
-* Maximum hosts per scan
-* Cancel Discovery
-* Progress indicator
+- Acknowledgement and assigned operator.
+- Comments and activity history.
+- Active, acknowledged, resolved, suppressed, and reopened states.
+- Manual and automatic resolution reason.
+- Escalation after configurable durations.
+- Reminder limits and notification cooldown.
+- Related-alert grouping.
+- Root-cause incident linked to affected downstream devices.
 
-Como configuração inicial para produção, utilizar valores conservadores, por exemplo:
+All transitions must record actor, timestamp, previous state, new state, and reason.
 
-* Timeout: 1–2 segundos
-* Concurrent hosts: 10–20
-* Retry: 1
-* Safe rate limiting habilitado
+### 8. Maintenance windows and silencing
 
-Esses valores devem ser configuráveis posteriormente.
+Add maintenance schedules for devices, links, groups, services, or locations.
 
----
+Required behavior:
 
-### 5. Scan Profiles
+- One-time and recurring windows.
+- Timezone-aware scheduling.
+- Optional monitoring continuation while notifications are suppressed.
+- Visible maintenance state in topology and device lists.
+- SLA reports can include or exclude planned maintenance.
+- Emergency silence requires a reason and expiration time.
 
-Se possível, adicionar:
+### 9. Notification reliability
 
-**Scan Profile**
+Improve the delivery pipeline with:
 
-`Safe`
+- Persistent notification queue.
+- Retry with exponential backoff.
+- Dead-letter state for exhausted deliveries.
+- Per-provider rate limiting.
+- Delivery history linked to each incident.
+- Message templates with preview and test data.
+- Provider health and last successful delivery.
+- Clear distinction between incident, reminder, escalation, and recovery messages.
 
-* Baixa intensidade
-* Recomendado para produção
-* Concorrência limitada
-* Rate limiting habilitado
+## Priority 4 — User experience and reporting
 
-`Normal`
+### 10. Custom dashboards
 
-* Intensidade moderada
+Allow users to create and save dashboards containing:
 
-`Aggressive`
+- Availability and SLA widgets.
+- Critical devices and active incidents.
+- Highest latency and packet loss.
+- Top interfaces by utilization.
+- Devices with the most downtime.
+- Redundancy state.
+- Compact topology.
+- Group, location, tag, and period filters.
 
-* Maior concorrência/intensidade
-* Deve exigir privilégios de administrador e apresentar aviso antes da execução
+Dashboard layouts and filters should be stored per user in the active database.
 
-O default deve ser:
+### 11. Advanced device analytics
 
-`Safe`
+Enhance the existing device metric view with:
 
----
+- Compare current period with previous period.
+- Zoomable graphs and selectable metrics.
+- Annotations for outages, maintenance, and configuration changes.
+- Interface-level drill-down.
+- Baselines and anomaly indication.
+- Export graph as PNG and data as CSV.
+- Shareable, permission-checked URLs.
 
-### 6. Progress / Cancellation
+### 12. SLA and executive reporting
 
-Durante o Discovery, apresentar progresso real.
+Add:
 
-Exemplo:
+- SLA targets per device, service, group, or customer.
+- Business-hour calendars.
+- Planned-maintenance exclusions.
+- Error budgets and burn rate.
+- MTTR, MTBF, incident count, and availability trends.
+- Scheduled PDF/CSV delivery.
+- Report branding and reusable report definitions.
+- Comparison by location, group, provider, or device type.
 
-`Discovery Progress: 67%`
+Calculations must have documented formulas and produce equivalent results on every supported database.
 
-`Hosts Found: 38`
+### 13. Inventory and configuration history
 
-`Ports Scanned: 2,450`
+Track operational inventory changes:
 
-`Elapsed Time: 00:42`
+- Device and interface attributes over time.
+- Discovery reconciliation: new, changed, missing, or unmanaged assets.
+- Configuration change audit.
+- Tags, owners, service importance, warranty, and asset identifiers.
+- Duplicate detection by IP, hostname, serial number, or SNMP engine ID.
 
-Adicionar:
+Discovery should propose changes for approval instead of silently overwriting managed data.
 
-`Cancel Discovery`
+## Priority 5 — Scale and integration
 
-O cancelamento deve interromper novas tarefas de scan e permitir que as tarefas em execução sejam encerradas de forma controlada.
+### 14. Distributed pollers
 
----
+Support remote sites and segmented networks through pollers:
 
-### 9. Critérios de Aceitação
+- Secure registration and mutual authentication.
+- Assignment of devices or network ranges.
+- Local buffering during central-server outages.
+- Controlled concurrency and resource limits.
+- Version and health visibility.
+- No database credentials stored on pollers.
 
-O desenvolvimento será considerado correto quando:
+The central server remains the source of truth for configuration and reporting.
 
-**Teste 1 — Discovery básico**
+### 15. Public API, webhooks, and integrations
 
-Input:
+Provide a documented, versioned API and outbound webhooks for:
 
-`192.168.1.0/24`
+- Device and topology changes.
+- Incident creation, acknowledgement, and recovery.
+- SLA violations.
+- Discovery completion.
+- Notification delivery failures.
 
-Port Scan:
+Add scoped API tokens, expiration, rotation, revocation, rate limits, and audit logging. Candidate integrations include ticketing systems, SIEM platforms, Grafana, and automation tools.
 
-`No Port Scan`
+### 16. High availability and disaster recovery
 
-Resultado:
+Plan for:
 
-Hosts ativos encontrados sem realizar port scan.
+- Multiple backend instances.
+- Distributed job and notification queues.
+- Leader election for scheduled monitoring.
+- Health-aware load balancing.
+- Scheduled encrypted backups.
+- Automated restore verification.
+- Documented recovery point and recovery time objectives.
 
----
+In-memory discovery jobs and process-local state must move to a shared store before horizontal scaling.
 
-**Teste 2 — Top 100**
+## Cross-cutting quality improvements
 
-Input:
+These should accompany every approved feature:
 
-`192.168.1.0/24`
+- API pagination and stable response schemas.
+- Structured error codes for frontend messages.
+- Accessibility and keyboard navigation.
+- Responsive layouts and consistent empty/loading/error states.
+- Unit, integration, migration, and browser-level tests.
+- Performance budgets for API queries and frontend bundles.
+- Secrets excluded from logs, exports, backups, and API responses.
+- Migration tests for all supported database engines.
+- Operational documentation and rollback procedures.
 
-Port Scan:
+## Recommended delivery sequence
 
-`Top 100 Ports`
+### Phase A — Secure and stabilize
 
-Resultado:
+Status: **implemented**. Production activation requires setting unique secrets and completing the first-administrator bootstrap described in `README.md`.
 
-1. Descobrir hosts ativos.
-2. Executar Top 100 somente nos hosts ativos.
-3. Apresentar portas abertas.
-4. Não gerar tráfego desnecessário contra IPs inativos.
+1. Authentication and RBAC.
+2. Metric retention, aggregation, indexes, and pagination.
+3. NetMonitor self-monitoring.
 
----
+### Phase B — Improve monitoring value
 
-**Teste 3 — Custom**
+1. SNMP performance metrics.
+2. Monitoring templates.
+3. Service checks.
 
-Input:
+### Phase C — Professional incident management
 
-`192.168.1.0/24`
+1. Acknowledgement, ownership, and incident timeline.
+2. Maintenance windows and silencing.
+3. Persistent notification queue and escalation.
 
-Port Scan:
+### Phase D — Reporting and scale
 
-`Custom`
+1. Custom dashboards and enhanced analytics.
+2. SLA definitions and scheduled reports.
+3. Distributed pollers, public API, and high availability.
 
-Ports:
+## Evaluation checklist
 
-`22,80,443,3389`
+For each proposal, decide:
 
-Resultado:
+- [ ] Approved, rejected, or postponed.
+- [ ] Expected users and operational problem solved.
+- [ ] Priority and target release.
+- [ ] Required database migrations.
+- [ ] Security and permission requirements.
+- [ ] Expected metric/event volume.
+- [ ] Multidatabase test coverage.
+- [ ] Upgrade and rollback strategy.
+- [ ] Documentation and training requirements.
 
-Somente essas portas devem ser verificadas.
+## Suggested next decision
 
----
-
-**Teste 4 — Sem portas**
-
-Input:
-
-`192.168.1.0/24`
-
-Ports:
-
-`Empty`
-
-O sistema não deve apresentar erro de validação.
-
-Deve executar o Discovery normalmente.
-
----
-
-### Objetivo final
-
-O Network Discovery deve funcionar como uma ferramenta de descoberta de infraestrutura, e não simplesmente como um port scanner.
-
-O princípio deve ser:
-
-**Discover first → Identify active hosts → Enrich information → Optional Port Scan**
-
-Dessa forma, conseguimos ter uma descoberta eficiente e segura, inclusive em redes de produção, sem tornar a especificação de portas um requisito para descobrir equipamentos.
+The recommended next package is **Phase A — Secure and stabilize**. Authentication should come first because future administrative features, distributed pollers, API tokens, scheduled exports, and incident ownership all depend on a reliable user and permission model.

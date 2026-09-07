@@ -13,12 +13,19 @@ import ReactFlow, {
   useNodesState,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
+import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import DeviceIcon from './DeviceIcon';
 
 const NODE_WIDTH = 190;
 const HORIZONTAL_GAP = 110;
 const VERTICAL_GAP = 190;
+const RETURN_VIEW_KEY = 'netmonitor.topology.return-view';
+
+function readReturnView() {
+  try { return JSON.parse(sessionStorage.getItem(RETURN_VIEW_KEY) || 'null'); }
+  catch { return null; }
+}
 function prepareEdges(edges) {
   return edges.map((edge) => ({
     ...edge,
@@ -223,6 +230,8 @@ const CustomDeviceNode = ({ data = {} }) => {
 };
 
 export default function TopologyGraph({ graphData }) {
+  const navigate = useNavigate();
+  const returnViewRef = useRef(readReturnView());
   const nodeTypes = useMemo(() => ({ customDevice: CustomDeviceNode }), []);
   const edgeTypes = useMemo(() => ({ topologyEdge: TopologyEdge }), []);
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
@@ -248,8 +257,10 @@ export default function TopologyGraph({ graphData }) {
 
   useEffect(() => {
     api.get('/platform/topology-layout').then(({ data }) => {
-      setLayoutMode(data.layout_mode || 'auto');
-      setPersistedPositions(Object.fromEntries((data.positions || []).map(item => [`device_${item.device_id}`, { x:item.x, y:item.y }])));
+      const returnView = returnViewRef.current;
+      setLayoutMode(returnView?.layoutMode || data.layout_mode || 'auto');
+      setSelectedSnapshotId(returnView?.selectedSnapshotId || '');
+      setPersistedPositions(returnView?.positions || Object.fromEntries((data.positions || []).map(item => [`device_${item.device_id}`, { x:item.x, y:item.y }])));
     }).catch(() => setPersistedPositions({}));
     api.get('/platform/topology-layout/snapshots').then(({ data }) => setSnapshots(data)).catch(() => setSnapshots([]));
   }, []);
@@ -334,7 +345,7 @@ export default function TopologyGraph({ graphData }) {
 
     setNodes((currentNodes) => {
       const currentPositionById = new Map(currentNodes.map((node) => [node.id, node.position]));
-      const shouldReorganize = currentNodes.length === 0 || (layoutMode === 'auto' && structureChanged);
+      const shouldReorganize = (currentNodes.length === 0 && Object.keys(savedPositions).length === 0) || (layoutMode === 'auto' && structureChanged && !returnViewRef.current);
       if (shouldReorganize) return autoNodes;
 
       return rawNodes.map((node) => ({
@@ -389,6 +400,21 @@ export default function TopologyGraph({ graphData }) {
     });
   };
 
+  const openDeviceMetrics = (node) => {
+    const deviceId = Number(String(node.id).replace('device_', ''));
+    if (!Number.isInteger(deviceId)) return;
+    const positions = Object.fromEntries(nodes.map(item => [item.id, { x:item.position.x, y:item.position.y }]));
+    try {
+      sessionStorage.setItem(RETURN_VIEW_KEY, JSON.stringify({
+        positions,
+        viewport: flowInstanceRef.current?.getViewport?.() || null,
+        layoutMode,
+        selectedSnapshotId,
+      }));
+    } catch (error) { console.warn('Unable to preserve the topology view', error); }
+    navigate(`/devices/${deviceId}?from=topology`);
+  };
+
   if (rawNodes.length === 0) {
     return (
       <div className="glass-card" style={{ width: '100%', height: 'clamp(620px, calc(100vh - 210px), 860px)', borderRadius: '12px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', color: 'var(--text-muted)' }}>
@@ -401,8 +427,8 @@ export default function TopologyGraph({ graphData }) {
   return (
     <div ref={containerRef} className="glass-card topology-canvas" style={{ width: '100%', height: isFullscreen ? '100vh' : 'clamp(620px, calc(100vh - 210px), 860px)', borderRadius: isFullscreen ? 0 : '12px', overflow: 'hidden', position: 'relative', background: '#111827' }}>
       <div style={{ position: 'absolute', top: '12px', right: '12px', left: '12px', zIndex: 10, display: 'flex', justifyContent:'flex-end', flexWrap:'wrap', gap: '6px', padding: '5px', borderRadius: '9px', background: 'rgba(15, 23, 42, 0.94)', border: '1px solid var(--border-color)', boxShadow: '0 6px 18px rgba(0,0,0,.28)' }}>
-        <select className="form-select" value={selectedSnapshotId} onChange={event => setSelectedSnapshotId(event.target.value)} style={{ width:'190px', padding:'5px 8px', fontSize:'0.72rem' }} title="Saved views">
-          <option value="">Saved views…</option>
+        <select className="form-select" value={selectedSnapshotId} onChange={event => setSelectedSnapshotId(event.target.value)} style={{ width:'190px', padding:'5px 8px', fontSize:'0.72rem' }} title="My saved views">
+          <option value="">My saved views…</option>
           {snapshots.map(snapshot => <option key={snapshot.id} value={snapshot.id}>{snapshot.name}</option>)}
         </select>
         <button type="button" className="btn btn-secondary" onClick={saveSnapshot} style={{ padding:'6px 9px', fontSize:'0.72rem' }} title={selectedSnapshotId ? 'Update selected view' : 'Save a new view'}><Save size={14}/> {selectedSnapshotId ? 'Save' : 'Save View'}</button>
@@ -429,12 +455,22 @@ export default function TopologyGraph({ graphData }) {
           edges={edges}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
+          onNodeDoubleClick={(_event, node) => openDeviceMetrics(node)}
           onNodeDragStop={handleNodeDragStop}
           nodesDraggable={layoutMode === 'free'}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
-          onInit={(instance) => { flowInstanceRef.current = instance; }}
-          fitView
+          onInit={(instance) => {
+            flowInstanceRef.current = instance;
+            const returnView = returnViewRef.current;
+            if (returnView?.viewport && Number.isFinite(returnView.viewport.zoom)) {
+              setTimeout(() => {
+                instance.setViewport(returnView.viewport, { duration:0 });
+                sessionStorage.removeItem(RETURN_VIEW_KEY);
+              }, 80);
+            }
+          }}
+          fitView={!returnViewRef.current}
           fitViewOptions={{ padding: 0.2 }}
           minZoom={0.35}
         >

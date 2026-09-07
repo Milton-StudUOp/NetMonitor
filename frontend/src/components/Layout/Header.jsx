@@ -1,7 +1,7 @@
 import React from 'react';
-import { Wifi, WifiOff, Bell } from 'lucide-react';
+import { Wifi, WifiOff, KeyRound, LogOut } from 'lucide-react';
 
-export default function Header({ isConnected, title = 'Dashboard' }) {
+export default function Header({ isConnected, user, onLogout, onChangePassword, title = 'Dashboard' }) {
   return (
     <header style={{
       height: '64px',
@@ -31,8 +31,9 @@ export default function Header({ isConnected, title = 'Dashboard' }) {
           border: `1px solid ${isConnected ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
         }}>
           {isConnected ? <Wifi size={14} /> : <WifiOff size={14} />}
-          <span>{isConnected ? 'Real-time WebSocket' : 'Desconectado'}</span>
+          <span>{isConnected ? 'Real-time WebSocket' : 'Disconnected'}</span>
         </div>
+        <div className="header-user"><div><strong>{user?.display_name}</strong><span>{user?.role}</span></div><button className="icon-button" onClick={onChangePassword} title="Change password"><KeyRound size={16}/></button><button className="icon-button" onClick={onLogout} title="Sign out"><LogOut size={16}/></button></div>
       </div>
     </header>
   );

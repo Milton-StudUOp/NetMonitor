@@ -12,9 +12,10 @@ import {
   Activity,
   Radar,
   Settings,
+  HeartPulse,
 } from 'lucide-react';
 
-export default function Sidebar() {
+export default function Sidebar({ user }) {
   const navItems = [
     { to: '/', label: 'Dashboard', icon: LayoutDashboard },
     { to: '/topology', label: 'Topology', icon: GitBranch },
@@ -24,8 +25,9 @@ export default function Sidebar() {
     { to: '/links', label: 'Links', icon: Network },
     { to: '/history', label: 'History', icon: History },
     { to: '/reports', label: 'Reports', icon: FileText },
-    { to: '/discovery', label: 'Discovery', icon: Radar },
-    { to: '/settings', label: 'Settings', icon: Settings },
+    ...(user?.role !== 'VIEWER' ? [{ to: '/discovery', label: 'Discovery', icon: Radar }] : []),
+    ...(user?.role === 'ADMINISTRATOR' ? [{ to: '/settings', label: 'Settings', icon: Settings }] : []),
+    ...(user?.role === 'ADMINISTRATOR' ? [{ to: '/system-health', label: 'System Health', icon: HeartPulse }] : []),
   ];
 
   return (

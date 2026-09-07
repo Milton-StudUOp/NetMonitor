@@ -9,9 +9,10 @@ from app.models.device import Device
 from app.models.link import Link
 from app.models.platform import NotificationDelivery, NotificationIntegration, NotificationRule
 from app.models.redundancy_group import RedundancyGroup
-from app.services.notification.channels import send_notification
+from app.services.notification.channels import environment_email_integration, send_notification
 
 logger = structlog.get_logger()
+SEVERITY_RANK = {"INFORMATION": 0, "WARNING": 1, "CRITICAL": 2}
 
 
 def _event_type(title: str, recovery: bool) -> str:
@@ -30,13 +31,14 @@ def _event_type(title: str, recovery: bool) -> str:
 def _rule_matches(rule, event: str, original_event: str, severity: str, recovery: bool, searchable_text: str) -> bool:
     if rule.source and rule.source.lower() not in searchable_text.lower():
         return False
+    severity_matches = SEVERITY_RANK.get(severity, -1) >= SEVERITY_RANK.get(rule.severity, 99)
     if not recovery:
-        return rule.event_type == event and rule.severity == severity
+        return rule.event_type == event and severity_matches
     if not rule.notify_recovery:
         return False
     if rule.event_type in {event, "RECOVERY"}:
         return True
-    return rule.event_type == original_event and rule.severity == severity
+    return rule.event_type == original_event and severity_matches
 
 
 async def dispatch_persisted_notifications(title: str, message: str, severity: str, alert_id: int, recovery: bool = False):
@@ -62,6 +64,10 @@ async def dispatch_persisted_notifications(title: str, message: str, severity: s
         if not due_rules: return
         integrations = (await db.execute(select(NotificationIntegration).where(NotificationIntegration.enabled == True))).scalars().all()
         integrations_by_provider = {integration.provider: integration for integration in integrations}
+        if "EMAIL" not in integrations_by_provider:
+            environment_email = environment_email_integration()
+            if environment_email:
+                integrations_by_provider["EMAIL"] = environment_email
         delivered_rules = []
         for rule in due_rules:
             rule_sent = False

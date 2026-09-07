@@ -19,13 +19,17 @@ Connections registered under **Settings → Databases** can be promoted with **U
 1. Enable and test the connection.
 2. Create the schema at the destination.
 3. Refuse promotion if application tables already contain data.
-4. Copy data transactionally in dependency order.
-5. Restore circular references between devices and links.
-6. Compare counts for every table.
-7. Store the encrypted selection in `backend/.active-database`.
-8. Restart the backend manually.
+4. Derive the copy order from the model's foreign keys and defer only declared circular references.
+5. Pause monitoring and reject mutations while promotion is running.
+6. Read the source through a consistent transaction snapshot and copy records in bounded batches.
+7. Validate every table inside the destination transaction before committing.
+8. Restore generated keys and deferred circular references.
+9. Store the encrypted selection in `backend/.active-database`.
+10. Restart the backend manually; monitoring remains paused after a successful promotion until restart.
 
 The file is ignored by Git and contains no plaintext URL. Encryption depends on `SECRET_KEY`.
+
+The `SECRET_KEY` used to activate the database must be preserved for the lifetime of that selection. If a different key is supplied, startup stops with an explicit `ActiveDatabaseKeyError`; it does not silently open the fallback SQLite database.
 
 ## Drivers
 
@@ -79,9 +83,22 @@ Security rules:
 
 ## Recovery
 
-The previous database is retained, and its URL is encrypted as a rollback option. If the promoted database fails during startup, the application lifespan automatically switches to the previous database, updates the activation file, and continues startup. `POST /api/platform/database-runtime/rollback` also prepares a manual return after validating authentication against the previous database.
+The previous database is retained, and its URL is encrypted as a rollback option. Startup never switches databases automatically: an unavailable or incompatible primary database stops startup clearly, preventing a stale fallback from appearing as the live inventory. `POST /api/platform/database-runtime/rollback` prepares an explicit administrative return after validating authentication against the previous database.
 
-If the activation file itself is corrupted, move `backend/.active-database` to a safe location and restart. The system will use `DATABASE_URL` or the default SQLite database.
+If the selected database is unavailable, an administrator must explicitly validate and select the recorded previous database. A key mismatch prevents both startup and rollback until the original key is restored because both URLs are encrypted.
+
+## Integrity controls
+
+- `database_schema_versions` records the schema level expected by the application and refuses to run older code against a newer schema.
+- The runtime migrator adds missing ownership and uniqueness constraints idempotently.
+- MySQL and PostgreSQL application connections set their session timezone to UTC.
+- Active primary connections are resolved dynamically from their URL and cannot be deleted or promoted again.
+- Migration validation occurs before commit; a mismatch rolls the destination data back.
+- Promotion uses batches of 1,000 records instead of materializing high-volume metric tables in process memory.
+
+If the activation file is structurally corrupted, copy it to a safe location before changing anything. Moving it aside makes the system use `DATABASE_URL` or the default SQLite database, which may correctly appear empty when the real inventory lives in a remote database. Always verify the intended database and record counts before accepting the fallback as the new primary.
+
+See [Operations and upgrades](OPERATIONS.md) for the full “inventory disappeared” checklist.
 
 ## Real integration tests
 
@@ -109,3 +126,4 @@ This test creates and removes NetMonitor tables in the specified database. Never
 - Take native database backups in addition to configuration exports.
 - Do not share one SQLite file among multiple instances.
 - Keep `SECRET_KEY` outside the image and stable across restarts.
+- Back up `.active-database` together with the key and native database backup; none is sufficient alone for complete recovery.

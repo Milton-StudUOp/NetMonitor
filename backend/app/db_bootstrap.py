@@ -7,7 +7,14 @@ from pathlib import Path
 
 from cryptography.fernet import Fernet, InvalidToken
 
-BOOTSTRAP_FILE = Path(__file__).resolve().parents[1] / ".active-database"
+BOOTSTRAP_FILE = Path(os.environ.get(
+    "NETMONITOR_ACTIVE_DATABASE_FILE",
+    Path(__file__).resolve().parents[1] / ".active-database",
+))
+
+
+class ActiveDatabaseKeyError(RuntimeError):
+    """Raised when the configured key cannot decrypt the selected database."""
 
 
 def _cipher(secret_key: str) -> Fernet:
@@ -23,7 +30,12 @@ def load_active_database(default_url: str, secret_key: str) -> tuple[str, dict |
         metadata = {key: payload.get(key) for key in ("connection_id", "name", "database_type", "activated_at")}
         metadata["rollback_available"] = bool(payload.get("encrypted_previous_url"))
         return url, metadata
-    except (OSError, ValueError, KeyError, InvalidToken, json.JSONDecodeError):
+    except InvalidToken as error:
+        raise ActiveDatabaseKeyError(
+            "SECRET_KEY cannot decrypt backend/.active-database. Restore the key used when "
+            "the database was activated; refusing to fall back to an empty database."
+        ) from error
+    except (OSError, ValueError, KeyError, json.JSONDecodeError):
         return default_url, None
 
 

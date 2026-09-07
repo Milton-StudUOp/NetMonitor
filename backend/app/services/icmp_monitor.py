@@ -108,7 +108,6 @@ async def ping_target(ip_address: str, count: int = 2, timeout: float = 2.0) -> 
             "packet_loss_pct": packet_loss if is_up else 100.0,
         }
 
-    except Exception as e:
-        err_msg = str(e) or repr(e)
-        logger.warning("icmp_ping_error", ip=ip_address, error=err_msg)
+    except Exception:
+        logger.warning("icmp_ping_error", error_type="ProbeExecutionError")
         return {"is_up": False, "latency_ms": None, "packet_loss_pct": 100.0}
