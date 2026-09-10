@@ -49,6 +49,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nm_user}:${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD no arquivo .env}@postgres:5432/${POSTGRES_DB:-network_monitor}
       REDIS_URL: redis://redis:6379/0
+      WHATSAPP_WEB_SERVICE_URL: http://whatsapp-web:3010
     ports:
       - "5555:5555"
     depends_on:
@@ -56,11 +57,32 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      whatsapp-web:
+        condition: service_healthy
     networks:
       - monitor-net
     volumes:
       - ./backend:/app
     command: uvicorn app.main:app --host 0.0.0.0 --port 5555 --reload
+
+  whatsapp-web:
+    build:
+      context: ./whatsapp-web
+      dockerfile: Dockerfile
+    container_name: nm_whatsapp_web
+    restart: unless-stopped
+    environment:
+      WHATSAPP_WEB_SERVICE_TOKEN: ${WHATSAPP_WEB_SERVICE_TOKEN:?Define WHATSAPP_WEB_SERVICE_TOKEN in .env}
+      WHATSAPP_PRINT_QR_TERMINAL: ${WHATSAPP_PRINT_QR_TERMINAL:-false}
+    volumes:
+      - whatsappauth:/data/auth
+    networks:
+      - monitor-net
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3010/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
 
   frontend:
     build:
@@ -78,6 +100,7 @@ services:
 volumes:
   pgdata:
   redisdata:
+  whatsappauth:
 
 networks:
   monitor-net:

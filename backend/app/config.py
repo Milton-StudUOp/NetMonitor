@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: str = ""
     TELEGRAM_CHAT_ID: str = ""
 
+    # Notifications — isolated whatsapp-web.js bridge
+    WHATSAPP_WEB_SERVICE_URL: str = ""
+    WHATSAPP_WEB_SERVICE_TOKEN: str = ""
+
     # App
     SECRET_KEY: str
     DEBUG: bool = False

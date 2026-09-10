@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 import smtplib
 import ssl
 from datetime import datetime, timezone
@@ -14,6 +15,11 @@ from app.config import get_settings
 from app.models.platform import NotificationIntegration
 from app.security import decrypt_secret, encrypt_secret
 from app.services.tls import verified_tls_context
+from app.services.whatsapp_web import (
+    WhatsAppWebConfigurationError,
+    whatsapp_web_connection,
+    whatsapp_web_send,
+)
 
 
 class NotificationConfigurationError(ValueError):
@@ -71,13 +77,21 @@ def validate_integration(provider: str, config: dict, secrets: dict) -> None:
         required = {"bot token": secrets.get("bot_token"), "at least one Chat ID": chat_ids}
     elif provider == "WHATSAPP":
         recipients = config.get("recipients") or ([config.get("recipient")] if config.get("recipient") else [])
-        required = {
-            "API URL": config.get("api_url"), "API token": secrets.get("api_token"),
-            "at least one recipient": recipients,
-        }
-        url = config.get("api_url")
-        if url and urlparse(url).scheme not in {"http", "https"}:
-            raise NotificationConfigurationError("WhatsApp API URL must use HTTP or HTTPS.")
+        required = {"at least one recipient": recipients}
+        if config.get("mode", "HTTP_API") == "WEBJS":
+            if any(not re.fullmatch(r"\d{8,15}", str(target).strip()) for target in recipients):
+                raise NotificationConfigurationError(
+                    "WhatsApp Web recipients must contain 8 to 15 digits, including the country code."
+                )
+            try:
+                whatsapp_web_connection()
+            except WhatsAppWebConfigurationError as exc:
+                raise NotificationConfigurationError(str(exc)) from exc
+        else:
+            required.update({"API URL": config.get("api_url"), "API token": secrets.get("api_token")})
+            url = config.get("api_url")
+            if url and urlparse(url).scheme not in {"http", "https"}:
+                raise NotificationConfigurationError("WhatsApp API URL must use HTTP or HTTPS.")
     else:
         raise NotificationConfigurationError(f"Unsupported notification provider: {provider}.")
 
@@ -95,6 +109,50 @@ SEVERITY_PRESENTATION = {
 
 def _event_label(value: str) -> str:
     return (value or "MONITORING_EVENT").replace("_", " ").title()
+
+
+def _whatsapp_value(value, limit: int = 500) -> str:
+    """Normalize dynamic values without breaking WhatsApp bold markers."""
+    normalized = " ".join(str(value or "").split()).replace("*", "")
+    return normalized[:limit]
+
+
+def _whatsapp_time(value) -> str:
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc).strftime("%d %b %Y · %H:%M UTC")
+    except (TypeError, ValueError):
+        return _whatsapp_value(value, 60)
+
+
+def build_whatsapp_content(
+    title: str, message: str, severity: str, context: dict | None = None,
+) -> str:
+    context = context or {}
+    recovered = bool(context.get("recovery"))
+    presentation = SEVERITY_PRESENTATION.get(
+        severity.upper(), SEVERITY_PRESENTATION["INFORMATION"]
+    )
+    alert_id = context.get("alert_id")
+    incident = f"NM-{int(alert_id):06d}" if alert_id is not None else "TEST"
+    heading = (
+        "✅ *RECOVERED*"
+        if recovered
+        else f"{presentation['icon']} *{presentation['label'].upper()} ALERT*"
+    )
+    lines = [heading, f"*{_whatsapp_value(title, 180)}*"]
+    if context.get("target"):
+        lines.append(f"Target: {_whatsapp_value(context['target'], 180)}")
+    occurred_at = context.get("occurred_at") or datetime.now(timezone.utc).isoformat()
+    lines.extend([f"Time: {_whatsapp_time(occurred_at)}", f"Incident: {incident}"])
+    concise_message = _whatsapp_value(message)
+    if concise_message and concise_message.lower() != _whatsapp_value(title).lower():
+        lines.extend(["", concise_message])
+    if context.get("root_cause") and not recovered:
+        lines.extend(["", f"Cause: {_whatsapp_value(context['root_cause'])}"])
+    return "\n".join(lines)
 
 
 def recipient_targets(provider: str, config: dict, additional: list[str] | None = None) -> list[str]:
@@ -170,7 +228,12 @@ def build_notification_content(
     <div style="padding:14px 26px;background:#0f172a;color:#94a3b8;font-size:11px">Automated infrastructure monitoring notification · NetMonitor</div>
   </div>
 </body></html>"""
-    return {"subject": subject, "plain": plain, "html": html}
+    return {
+        "subject": subject,
+        "plain": plain,
+        "html": html,
+        "whatsapp": build_whatsapp_content(title, message, severity, context),
+    }
 
 
 async def send_notification(
@@ -201,7 +264,12 @@ async def send_notification(
         return
 
     if item.provider == "WHATSAPP":
+        text = content["whatsapp"]
         targets = recipient_targets("WHATSAPP", config, additional_recipients)
+        if config.get("mode", "HTTP_API") == "WEBJS":
+            for target in targets:
+                await whatsapp_web_send(target, text)
+            return
         async with httpx.AsyncClient(timeout=10) as client:
             for target in targets:
                 response = await client.post(
@@ -237,6 +305,8 @@ async def send_notification(
 
 def safe_delivery_error(exc: Exception) -> str:
     if isinstance(exc, NotificationConfigurationError):
+        return str(exc)
+    if isinstance(exc, WhatsAppWebConfigurationError):
         return str(exc)
     if isinstance(exc, httpx.HTTPStatusError):
         return f"Provider returned HTTP {exc.response.status_code}. Verify credentials and recipient settings."

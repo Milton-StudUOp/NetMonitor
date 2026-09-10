@@ -15,7 +15,7 @@ Network infrastructure monitoring platform with automatic discovery, persistent 
 - Built-in icon library and sanitized SVG/PNG uploads.
 - Redundancy through links or directly between devices.
 - Normal, degraded, and critical states with dependency diagnostics.
-- SMTP email, Telegram, and WhatsApp through an official API/provider.
+- SMTP email, Telegram, and WhatsApp through an official API/provider or an optional isolated WhatsApp Web bridge.
 - Rules, deduplication, reminders, and recovery notifications.
 - SQLite by default, with SQLite, PostgreSQL, MySQL, SQL Server, or Oracle promotion to the primary database.
 - Validated migration before switching the primary database.
@@ -220,6 +220,20 @@ Configure channels under **Settings → Notifications**:
 - **SMTP Email** supports unauthenticated or authenticated SMTP, STARTTLS, and implicit TLS. Do not enable STARTTLS and implicit TLS at the same time.
 - **Telegram** requires a BotFather token and supports multiple destination Chat IDs, including groups and channels.
 - **WhatsApp API** requires an HTTP(S) provider endpoint and bearer token, and supports multiple recipient numbers. The endpoint must accept `sender`, `recipient`, and `message` JSON fields.
+- **Linked WhatsApp Web** runs in the separate `whatsapp-web` Node.js service. Administrators connect an account by scanning a protected QR code in Settings; the session is stored in an isolated persistent filesystem and the backend reaches the bridge with an internal bearer token.
+
+Every recipient field supports more than one destination. Enter email addresses, Telegram Chat IDs, or WhatsApp numbers separated by commas, semicolons, or line breaks. The interface preserves the separators while typing, then trims empty values and removes duplicates when saving. WhatsApp Web numbers must contain 8–15 digits including the country code, without `+`, spaces, or punctuation.
+
+For a local Linux installation without Chromium packages, initialize and start the bridge with:
+
+```bash
+cd /var/www/cln/NetMonitor/whatsapp-web
+PUPPETEER_SKIP_DOWNLOAD=true npm ci
+npm run install-browser
+npm run start:qr
+```
+
+`start:qr` loads the project `.env`, ignores stale token/browser variables inherited from the shell, and prints the linking QR in the private terminal. The same QR is available to administrators under **Settings → Notifications → WhatsApp**. After linking, keep the bridge running alongside FastAPI; status `READY` is required for delivery.
 
 Use **Save & Test** before enabling production rules. Rules can filter events by type, minimum severity, and source text; select one or more channels; add rule-specific recipients; send reminders; and notify on recovery. A `WARNING` rule therefore receives warning and critical events, while a `CRITICAL` rule receives only critical events. Secrets are encrypted at rest and are never returned by the API.
 
@@ -232,6 +246,10 @@ Operational severity is classified consistently:
 The configured consecutive-failure threshold still applies before an outage is confirmed. This prevents a single transient probe failure from immediately creating a critical incident. Active incidents are deduplicated and recovery notifications are generated when the affected target returns to service.
 
 When no EMAIL integration exists in the active database, the Settings screen loads SMTP host, port, username, sender, recipients, and encryption mode from `.env`. The password is represented only as **Configured**. Saving the imported configuration stores that password encrypted in the active database. Account invitation and recovery email also use this environment configuration as a secure fallback.
+
+The WhatsApp Web option is unofficial and can be disrupted or blocked by WhatsApp. Use the official/provider API mode for contractual or business-critical delivery. The bridge automatically detects common Chrome/Chromium paths and supports `npm run install-browser` when the operating system has no Chromium package. QR codes appear in the protected application screen and can optionally be printed in the private bridge terminal. See [WhatsApp Web integration](docs/WHATSAPP_WEB.md) for installation, QR linking, persistence, security, and operational limitations.
+
+WhatsApp messages use a channel-specific compact layout: status/severity, short incident title, target, UTC timestamp, incident reference, concise description, and probable cause. Recovery messages omit the cause and use a shorter `RECOVERED` heading. Email and Telegram retain their own presentation formats.
 
 ## Tests
 
@@ -250,6 +268,7 @@ npm run build
 - [Authentication and access control](docs/AUTHENTICATION.md)
 - [Databases and migration](docs/DATABASES.md)
 - [Operations and upgrades](docs/OPERATIONS.md)
+- [WhatsApp Web integration](docs/WHATSAPP_WEB.md)
 - [Security](SECURITY.md)
 - [Contributing](CONTRIBUTING.md)
 - [Premium specification status](improvement.md)

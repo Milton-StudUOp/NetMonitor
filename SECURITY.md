@@ -47,7 +47,7 @@ Uploads accept SVG and PNG files up to 512 KB. SVG files containing `script`, a 
 
 ## External communication
 
-Telegram and WhatsApp send data to the configured provider. Do not include unnecessary sensitive data in messages. For WhatsApp, use only an official API or a contractually authorized provider; WhatsApp Web automation is not supported.
+Telegram and WhatsApp send data to external services. Do not include unnecessary sensitive data in messages. The official/provider WhatsApp API is recommended for contractual and business-critical delivery. The optional `whatsapp-web.js` bridge is unofficial, can violate applicable platform terms, and cannot guarantee that the linked account will not be restricted. It must remain isolated on localhost or the private container network, protected by a unique internal token, run as a non-root user, and store its session volume as sensitive runtime data. QR payloads and the bridge token must never be logged, committed, backed up through the configuration export, or exposed through a public reverse proxy.
 
 ## Reporting vulnerabilities
 

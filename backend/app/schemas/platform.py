@@ -115,13 +115,18 @@ class NotificationIntegrationInput(BaseModel):
         allowed_config = {
             "EMAIL": {"smtp_server", "smtp_port", "username", "from_address", "recipients", "tls", "ssl"},
             "TELEGRAM": {"chat_id", "chat_ids"},
-            "WHATSAPP": {"api_url", "sender_id", "recipient", "recipients"},
+            "WHATSAPP": {"mode", "api_url", "sender_id", "recipient", "recipients"},
         }[self.provider]
         allowed_secrets = {"EMAIL": {"password"}, "TELEGRAM": {"bot_token"}, "WHATSAPP": {"api_token"}}[self.provider]
         unknown_config = set(self.config) - allowed_config
         unknown_secrets = set(self.secrets) - allowed_secrets
         if unknown_config or unknown_secrets:
             raise ValueError("Configuration contains unsupported fields for this provider")
+        if self.provider == "WHATSAPP":
+            mode = str(self.config.get("mode") or ("HTTP_API" if self.config.get("api_url") else "WEBJS")).upper()
+            if mode not in {"WEBJS", "HTTP_API"}:
+                raise ValueError("WhatsApp mode must be WEBJS or HTTP_API")
+            self.config["mode"] = mode
         return self
 
 

@@ -3,7 +3,7 @@ import base64
 import json
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile, status
 from sqlalchemy import DateTime as SQLDateTime, delete, select
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,6 +27,7 @@ from app.services.database_adapters import (build_database_url, execute_read_onl
 from app.db_bootstrap import get_previous_database, rollback_active_database
 from app.services.notification.channels import (environment_email_integration, safe_delivery_error,
     send_notification, validate_integration)
+from app.services.whatsapp_web import whatsapp_web_logout, whatsapp_web_start, whatsapp_web_status
 
 router = APIRouter(prefix="/api/platform", tags=["Platform configuration"])
 BUILTIN_ICONS = [
@@ -341,6 +342,30 @@ async def test_notification(provider: str, db: AsyncSession = Depends(get_db)):
     item.last_tested_at = datetime.now(timezone.utc)
     await _audit(db, "TEST", "NOTIFICATION", item.id if persisted else None, f"{item.provider} test: {item.last_status}")
     return {"status": item.last_status, "message": item.last_error or "Test notification sent."}
+
+
+async def _whatsapp_session_action(action):
+    try:
+        return await action()
+    except Exception as exc:
+        raise HTTPException(502, safe_delivery_error(exc)) from exc
+
+
+@router.get("/notifications/WHATSAPP/session")
+async def get_whatsapp_session(response: Response):
+    response.headers["Cache-Control"] = "no-store"
+    return await _whatsapp_session_action(whatsapp_web_status)
+
+
+@router.post("/notifications/WHATSAPP/session/start")
+async def start_whatsapp_session(response: Response):
+    response.headers["Cache-Control"] = "no-store"
+    return await _whatsapp_session_action(whatsapp_web_start)
+
+
+@router.delete("/notifications/WHATSAPP/session")
+async def logout_whatsapp_session():
+    return await _whatsapp_session_action(whatsapp_web_logout)
 
 
 @router.get("/notification-rules", response_model=list[NotificationRuleRead])

@@ -54,6 +54,8 @@ pnpm-debug.log*
 *.log
 logs/
 data/
+.wwebjs_auth/
+.wwebjs_cache/
 .active-database
 **/.active-database
 
