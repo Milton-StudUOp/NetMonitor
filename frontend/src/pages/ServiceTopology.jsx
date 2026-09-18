@@ -4,7 +4,6 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import ReactFlow, { Background, Controls, MarkerType, MiniMap, Position, useEdgesState, useNodesState } from 'reactflow';
 import 'reactflow/dist/style.css';
 import api from '../api/client';
-import ServiceConfigModal from '../components/ServiceConfigModal';
 import { getApiErrorMessage } from '../utils/errors';
 
 const colors={UP:'#22c55e',DOWN:'#ef4444',SUSPECTED:'#f59e0b',RECOVERING:'#f59e0b',UNKNOWN:'#64748b'};
@@ -25,7 +24,7 @@ function buildGraph(data,selected) {
 
 export default function ServiceTopology() {
   const navigate=useNavigate(); const [params,setParams]=useSearchParams(); const container=useRef(null); const flow=useRef(null);
-  const [data,setData]=useState({devices:[],services:[],edges:[]}); const [error,setError]=useState(''); const [loading,setLoading]=useState(true); const [layout,setLayout]=useState('auto'); const [fullscreen,setFullscreen]=useState(false); const [editing,setEditing]=useState(null);
+  const [data,setData]=useState({devices:[],services:[],edges:[]}); const [error,setError]=useState(''); const [loading,setLoading]=useState(true); const [layout,setLayout]=useState('auto'); const [fullscreen,setFullscreen]=useState(false);
   const [nodes,setNodes,onNodesChange]=useNodesState([]); const [edges,setEdges,onEdgesChange]=useEdgesState([]); const [views,setViews]=useState(()=>read(VIEW_KEY,[])); const [viewId,setViewId]=useState('');
   const selected=params.get('device')||''; const generated=useMemo(()=>buildGraph(data,selected),[data,selected]);
   const load=()=>{setLoading(true);setError('');api.get('/services/topology').then(r=>setData(r.data)).catch(e=>setError(getApiErrorMessage(e))).finally(()=>setLoading(false));};
@@ -42,10 +41,9 @@ export default function ServiceTopology() {
   const saveView=()=>{if(!viewId)return newView();saveViews(views.map(v=>v.id===viewId?{...v,positions:Object.fromEntries(nodes.map(n=>[n.id,n.position])),viewport:flow.current?.getViewport?.()}:v));};
   const restoreView=()=>{const view=views.find(v=>v.id===viewId);if(!view)return;setLayout('free');setNodes(current=>current.map(n=>({...n,position:view.positions[n.id]||n.position})));if(view.viewport)setTimeout(()=>flow.current?.setViewport(view.viewport,{duration:350}),0);};
   const deleteView=()=>{if(!viewId||!window.confirm('Delete this saved view?'))return;saveViews(views.filter(v=>v.id!==viewId));setViewId('');};
-  const openNode=(_,node)=>node.data.kind==='service'?setEditing(node.data.record):navigate(`/devices/${node.data.record.id}?from=service-topology`);
+  const openNode=(_,node)=>node.data.kind==='service'?navigate(`/services/${node.data.record.id}?from=topology`):navigate(`/devices/${node.data.record.id}?from=service-topology`);
 
   return <div className="data-page"><div className="page-title"><div><h2>Service Topology</h2><p>Live topology with reusable views, automatic or free layout, zoom, pan, and fullscreen.</p></div><div className="row-actions"><select className="form-select compact" value={selected} onChange={e=>setParams(e.target.value?{device:e.target.value}:{})}><option value="">All monitored devices</option>{data.devices.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select><button className="btn btn-secondary" onClick={load}><RefreshCw size={15} className={loading?'spin':''}/>Refresh</button></div></div>{error&&<div className="notice error">{error}</div>}
     <section ref={container} className="glass-card service-reactflow-board topology-canvas">{!nodes.length?<div className="service-placeholder"><Activity size={38}/><strong>No monitored service topology</strong><span>Discover and add services first.</span></div>:<><div className="service-topology-toolbar"><select className="form-select compact" value={viewId} onChange={e=>setViewId(e.target.value)}><option value="">My saved views…</option>{views.map(v=><option key={v.id} value={v.id}>{v.name}</option>)}</select><button className="btn btn-secondary" onClick={saveView}><Save size={14}/>{viewId?'Save':'Save View'}</button><button className="btn btn-secondary" onClick={newView}>+ New View</button><button className="btn btn-secondary" disabled={!viewId} onClick={restoreView}><RotateCcw size={14}/>Restore</button><button className="btn btn-danger" disabled={!viewId} onClick={deleteView}><Trash2 size={14}/></button><button className={`btn ${layout==='auto'?'btn-primary':'btn-secondary'}`} onClick={()=>changeLayout('auto')}><LayoutGrid size={14}/>Automatic</button><button className={`btn ${layout==='free'?'btn-primary':'btn-secondary'}`} onClick={()=>changeLayout('free')}><Move size={14}/>Free</button><button className="btn btn-secondary" onClick={reorganize}>Reorganize</button><button className="btn btn-secondary" onClick={toggleFullscreen}>{fullscreen?<Minimize2 size={14}/>:<Maximize2 size={14}/>} {fullscreen?'Exit':'Fullscreen'}</button></div><ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onNodeDragStop={dragStop} onNodeDoubleClick={openNode} onInit={instance=>flow.current=instance} fitView fitViewOptions={{padding:.2}} minZoom={.15} maxZoom={1.8} nodesDraggable={layout==='free'} nodesConnectable={false} elementsSelectable><Background color="#334155" gap={22}/><MiniMap pannable zoomable nodeColor={node=>node.id.startsWith('device-')?'#3b82f6':colors[node.data?.record?.monitor_state]||'#64748b'}/><Controls showInteractive={false}/></ReactFlow></>}</section>
-    <ServiceConfigModal service={editing} deviceName={data.devices.find(x=>x.id===editing?.device_id)?.name} onClose={()=>setEditing(null)} onSaved={load}/>
   </div>;
 }

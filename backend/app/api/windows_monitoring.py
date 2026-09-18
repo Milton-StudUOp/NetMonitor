@@ -1,4 +1,5 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from math import ceil
 from fnmatch import fnmatch
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
@@ -14,6 +15,11 @@ from app.security import decrypt_secret
 from app.services.windows_monitoring import WinRMTransport, WindowsMonitoringError, WindowsMonitoringProvider
 
 router = APIRouter(prefix="/api", tags=["Windows monitoring"])
+SERVICE_PERIOD_HOURS = {"24h": 24, "7d": 24 * 7, "30d": 24 * 30, "90d": 24 * 90}
+
+
+def _utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
 
 def _metric_snapshot(item: SystemMetricSnapshot) -> dict:
@@ -152,6 +158,66 @@ async def service_history(device_id: int, limit: int = Query(200, ge=1, le=1000)
     return [{"id": x.id, "service_id": x.service_id, "observed_state": x.observed_state,
         "monitor_state": x.monitor_state, "error_code": x.error_code, "response_ms": x.response_ms,
         "checked_at": x.checked_at} for x in rows]
+
+
+@router.get("/services/{service_id}/analytics")
+async def service_analytics(service_id: int, period: str = Query("24h"), db: AsyncSession = Depends(get_db)):
+    if period not in SERVICE_PERIOD_HOURS:
+        raise HTTPException(422, "Period must be one of: 24h, 7d, 30d, 90d")
+    service = await db.get(DiscoveredService, service_id)
+    if not service: raise HTTPException(404, "Service not found")
+    device = await db.get(Device, service.device_id)
+    end = datetime.now(timezone.utc); start = end - timedelta(hours=SERVICE_PERIOD_HOURS[period])
+    records = (await db.execute(select(ServiceCheckHistory).where(ServiceCheckHistory.service_id == service_id,
+        ServiceCheckHistory.checked_at >= start, ServiceCheckHistory.checked_at <= end)
+        .order_by(ServiceCheckHistory.checked_at))).scalars().all()
+    bucket_seconds = max(60, ceil((end - start).total_seconds() / 240)); buckets = {}
+    for record in records:
+        bucket = int((_utc(record.checked_at) - start).total_seconds() // bucket_seconds)
+        buckets.setdefault(bucket, []).append(record)
+    rank = {"UNKNOWN": 0, "UP": 1, "RECOVERING": 2, "SUSPECTED": 3, "DOWN": 4}
+    series = []
+    for bucket, samples in sorted(buckets.items()):
+        status = max((x.monitor_state for x in samples), key=lambda x: rank.get(x, 0))
+        times = [x.response_ms for x in samples if x.response_ms is not None]
+        healthy = sum(x.observed_state == service.expected_state and not x.error_code for x in samples)
+        series.append({"timestamp": (start + timedelta(seconds=bucket * bucket_seconds)).isoformat(),
+            "status": status, "availability_pct": round(healthy * 100 / len(samples), 2),
+            "response_ms": round(sum(times) / len(times), 2) if times else None, "samples": len(samples)})
+    outages = []; outage_start = None; previous = None; failures = recoveries = 0
+    for record in records:
+        timestamp = _utc(record.checked_at); state = record.monitor_state
+        if state == "DOWN" and previous != "DOWN":
+            failures += 1
+            if outage_start is None: outage_start = timestamp
+        if previous in {"DOWN", "RECOVERING"} and state == "UP": recoveries += 1
+        if outage_start and state == "UP":
+            outages.append({"started_at": outage_start.isoformat(), "ended_at": timestamp.isoformat(),
+                "duration_seconds": max(0, round((timestamp - outage_start).total_seconds())), "ongoing": False})
+            outage_start = None
+        previous = state
+    if outage_start:
+        ongoing = service.monitor_state == "DOWN"
+        stopped = end if ongoing else min(end, _utc(service.last_checked_at) if service.last_checked_at else end)
+        outages.append({"started_at": outage_start.isoformat(), "ended_at": None if ongoing else stopped.isoformat(),
+            "duration_seconds": max(0, round((stopped - outage_start).total_seconds())), "ongoing": ongoing})
+    known = [x for x in records if not x.error_code and x.observed_state != "unknown"]
+    successful = sum(x.observed_state == service.expected_state for x in known)
+    response_times = [x.response_ms for x in records if x.response_ms is not None]
+    return {"service": {**_service(service), "device_name": device.name if device else f"Device #{service.device_id}",
+            "ip_address": device.ip_address if device else None},
+        "period": {"start": start.isoformat(), "end": end.isoformat(), "bucket_seconds": bucket_seconds},
+        "summary": {"availability_pct": round(successful * 100 / len(known), 2) if known else None,
+            "total_checks": len(records), "successful_checks": successful,
+            "average_response_ms": round(sum(response_times) / len(response_times), 2) if response_times else None,
+            "maximum_response_ms": round(max(response_times), 2) if response_times else None,
+            "failure_events": failures, "recovery_events": recoveries,
+            "communication_errors": sum(bool(x.error_code) for x in records),
+            "downtime_seconds": sum(x["duration_seconds"] for x in outages), "outage_count": len(outages)},
+        "series": series, "outages": list(reversed(outages)),
+        "history": [{"id": x.id, "checked_at": x.checked_at, "observed_state": x.observed_state,
+            "monitor_state": x.monitor_state, "response_ms": x.response_ms, "error_code": x.error_code}
+            for x in reversed(records[-100:])]}
 
 
 @router.post("/devices/{device_id}/metrics/collect")

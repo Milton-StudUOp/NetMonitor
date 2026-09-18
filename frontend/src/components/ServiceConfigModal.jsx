@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { Save, X } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { getApiErrorMessage } from '../utils/errors';
 
 export default function ServiceConfigModal({ service, deviceName, onClose, onSaved }) {
+  const navigate = useNavigate();
   const [form, setForm] = useState(null);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
@@ -47,7 +49,7 @@ export default function ServiceConfigModal({ service, deviceName, onClose, onSav
         <Field label="Severity"><select className="form-select" value={form.severity} onChange={e=>update('severity',e.target.value)}><option>INFORMATION</option><option>WARNING</option><option>CRITICAL</option></select></Field>
       </div>
       <label className="check-line"><input type="checkbox" checked={form.notifications_enabled} onChange={e=>update('notifications_enabled',e.target.checked)}/>Notifications enabled for this service</label>
-      <div className="modal-actions"><button className="btn btn-danger" disabled={!!busy} onClick={()=>submit(false)}>{busy==='stop'?'Stopping…':'Stop Monitoring'}</button><button className="btn btn-primary" disabled={!!busy} onClick={()=>submit(true)}><Save size={15}/>{busy==='save'?'Saving…':'Save Service'}</button></div>
+      <div className="modal-actions"><button className="btn btn-danger" disabled={!!busy} onClick={()=>submit(false)}>{busy==='stop'?'Stopping…':'Stop Monitoring'}</button><div className="row-actions"><button className="btn btn-secondary" onClick={()=>navigate(`/services/${service.id}`)}>View Metrics</button><button className="btn btn-primary" disabled={!!busy} onClick={()=>submit(true)}><Save size={15}/>{busy==='save'?'Saving…':'Save Service'}</button></div></div>
     </section>
   </div>;
 }
