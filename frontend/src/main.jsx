@@ -2,6 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
 import './styles/index.css'
+import './styles/theme.css'
 
 // Apply the saved/system preference before React paints to avoid a theme flash.
 const initialTheme = localStorage.getItem('netmonitor.theme') || 'system'

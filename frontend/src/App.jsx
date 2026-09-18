@@ -15,7 +15,6 @@ import PlatformSettings from './pages/PlatformSettings';
 import Login from './pages/Login';
 import PasswordChange from './components/PasswordChange';
 import api, { getAuthToken, setAuthToken } from './api/client';
-import './styles/theme.css';
 
 const DeviceAnalytics = lazy(() => import('./pages/DeviceAnalytics'));
 const Alerts = lazy(() => import('./pages/Alerts'));
