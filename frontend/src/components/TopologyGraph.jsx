@@ -17,7 +17,7 @@ import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import DeviceIcon from './DeviceIcon';
 
-const NODE_WIDTH = 190;
+const NODE_WIDTH = 250;
 const HORIZONTAL_GAP = 110;
 const VERTICAL_GAP = 190;
 const RETURN_VIEW_KEY = 'netmonitor.topology.return-view';
@@ -189,6 +189,15 @@ const CustomDeviceNode = ({ data = {} }) => {
 
   const status = data.status || 'UNKNOWN';
   const border = statusColors[status] || '#64748b';
+  const metrics = data.metrics || null;
+  const uptime = metrics?.uptime_seconds == null ? null : `${Math.floor(metrics.uptime_seconds / 86400)}d ${Math.floor((metrics.uptime_seconds % 86400) / 3600)}h`;
+  const metricItems = metrics ? [
+    metrics.cpu_percent != null && ['CPU', `${metrics.cpu_percent}%`],
+    metrics.memory_percent != null && ['Memory', `${metrics.memory_percent}%`],
+    uptime != null && ['Uptime', uptime],
+    metrics.disk_count != null && ['Disks', metrics.disk_count],
+    metrics.interface_count != null && ['Interfaces', metrics.interface_count],
+  ].filter(Boolean) : [];
 
   return (
     <div style={{
@@ -222,6 +231,9 @@ const CustomDeviceNode = ({ data = {} }) => {
           {status}
         </span>
       </div>
+      {metricItems.length > 0 && <div title={metrics.collected_at ? `Collected ${new Date(metrics.collected_at).toLocaleString()}` : ''} style={{display:'grid',gridTemplateColumns:'repeat(2,minmax(0,1fr))',gap:'5px',marginTop:'9px',paddingTop:'8px',borderTop:'1px solid rgba(148,163,184,.2)',textAlign:'left'}}>
+        {metricItems.map(([label,value])=><div key={label} style={{display:'flex',justifyContent:'space-between',gap:'5px',padding:'3px 5px',borderRadius:'5px',background:'rgba(255,255,255,.035)',fontSize:'.64rem'}}><span style={{color:'#94a3b8'}}>{label}</span><b>{value}</b></div>)}
+      </div>}
       <Handle id="bottom" type="source" position={Position.Bottom} style={{ background: border }} />
       <Handle id="right" type="source" position={Position.Right} style={{ background: '#22d3ee' }} />
       <Handle id="left" type="target" position={Position.Left} style={{ background: '#22d3ee' }} />

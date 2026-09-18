@@ -22,6 +22,7 @@ class TopologyNodeData(BaseModel):
     icon_name: Optional[str] = None
     icon_custom_data: Optional[str] = None
     icon_mime_type: Optional[str] = None
+    metrics: Optional[dict] = None
 
 
 class TopologyNode(BaseModel):
