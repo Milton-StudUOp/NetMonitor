@@ -60,6 +60,8 @@ export default function Sidebar({ user }) {
         <div style={{
           width: '36px',
           height: '36px',
+          minWidth: '36px',
+          flex: '0 0 36px',
           borderRadius: '10px',
           background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
           display: 'flex',
@@ -69,7 +71,7 @@ export default function Sidebar({ user }) {
         }}>
           <Activity size={22} color="#fff" />
         </div>
-        <div>
+        <div style={{ minWidth: 0 }}>
           <h2 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-main)', letterSpacing: '-0.02em' }}>
             NetMonitor
           </h2>
