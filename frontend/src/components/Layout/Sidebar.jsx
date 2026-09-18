@@ -27,7 +27,9 @@ export default function Sidebar({ user }) {
     { to: '/history', label: 'History', icon: History },
     { to: '/reports', label: 'Reports', icon: FileText },
     ...(user?.role !== 'VIEWER' ? [{ to: '/discovery', label: 'Discovery', icon: Radar }] : []),
-    ...(user?.role !== 'VIEWER' ? [{ to: '/service-discovery', label: 'Service Discovery', icon: ScanSearch }] : []),
+    { to: '/service-monitoring', label: 'Service Monitoring', icon: Activity },
+    { to: '/service-topology', label: 'Service Topology', icon: GitBranch },
+    ...(user?.role !== 'VIEWER' ? [{ to: '/service-discovery', label: 'Discover Services', icon: ScanSearch }] : []),
     ...(user?.role === 'ADMINISTRATOR' ? [{ to: '/settings', label: 'Settings', icon: Settings }] : []),
     ...(user?.role === 'ADMINISTRATOR' ? [{ to: '/system-health', label: 'System Health', icon: HeartPulse }] : []),
   ];

@@ -22,6 +22,8 @@ const History = lazy(() => import('./pages/History'));
 const Reports = lazy(() => import('./pages/Reports'));
 const SystemHealth = lazy(() => import('./pages/SystemHealth'));
 const ServiceDiscovery = lazy(() => import('./pages/ServiceDiscovery'));
+const ServiceMonitoring = lazy(() => import('./pages/ServiceMonitoring'));
+const ServiceTopology = lazy(() => import('./pages/ServiceTopology'));
 const loadingPage = <div className="analytics-state">Loading page…</div>;
 
 export default function App() {
@@ -58,6 +60,8 @@ export default function App() {
                 <Route path="/reports" element={<Suspense fallback={loadingPage}><Reports /></Suspense>} />
                 <Route path="/discovery" element={<Discovery user={user} />} />
                 <Route path="/service-discovery" element={<Suspense fallback={loadingPage}><ServiceDiscovery user={user} /></Suspense>} />
+                <Route path="/service-monitoring" element={<Suspense fallback={loadingPage}><ServiceMonitoring /></Suspense>} />
+                <Route path="/service-topology" element={<Suspense fallback={loadingPage}><ServiceTopology /></Suspense>} />
                 <Route path="/settings" element={<PlatformSettings />} />
                 {user.role === 'ADMINISTRATOR' && <Route path="/system-health" element={<Suspense fallback={loadingPage}><SystemHealth /></Suspense>} />}
               </Routes>

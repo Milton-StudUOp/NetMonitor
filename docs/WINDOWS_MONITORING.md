@@ -17,10 +17,15 @@ polling, system metrics, health, history, alerts, and reusable monitoring profil
 The device screen presents protocol-neutral readiness information. Transport and
 capability details are available under **Advanced diagnostics**.
 
-Service operations use the dedicated **Service Discovery** workspace in the main
-navigation. Connection setup, discovery, filtering, selection, monitoring policy,
-and the service topology live there; they are deliberately kept out of the device
-metrics/analytics page. The workspace provides separate inventory and topology views.
+Service operations are a dedicated module in the main navigation:
+
+- **Service Monitoring** is the operational dashboard for health, coverage, failures,
+  and recent checks.
+- **Discover Services** is a four-step assistant: choose device, test connection,
+  discover, then select and configure monitoring.
+- **Service Topology** is a separate full-screen-capable device-to-service map.
+
+These workflows are deliberately kept out of the device metrics/analytics page.
 
 ## Security
 

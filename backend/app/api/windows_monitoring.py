@@ -34,6 +34,41 @@ def _service(item: DiscoveredService) -> dict:
         "monitor_state", "last_checked_at", "last_discovered_at")}
 
 
+@router.get("/services/overview")
+async def services_overview(db: AsyncSession = Depends(get_db)):
+    services = (await db.execute(select(DiscoveredService).where(
+        DiscoveredService.monitored.is_(True)).order_by(DiscoveredService.last_checked_at.desc()))).scalars().all()
+    devices = {x.id: x for x in (await db.execute(select(Device))).scalars().all()}
+    counts = {state: sum(1 for x in services if x.monitor_state == state)
+              for state in ("UP", "DOWN", "SUSPECTED", "RECOVERING", "UNKNOWN")}
+    by_device = []
+    for device_id in sorted({x.device_id for x in services}):
+        items = [x for x in services if x.device_id == device_id]; device = devices.get(device_id)
+        if not device: continue
+        health = "DOWN" if any(x.monitor_state == "DOWN" for x in items) else (
+            "DEGRADED" if any(x.monitor_state in {"SUSPECTED", "RECOVERING", "UNKNOWN"} for x in items) else "UP")
+        by_device.append({"device_id": device.id, "device_name": device.name, "ip_address": device.ip_address,
+            "device_status": device.status.value, "service_health": health, "total": len(items),
+            "down": sum(1 for x in items if x.monitor_state == "DOWN"),
+            "degraded": sum(1 for x in items if x.monitor_state in {"SUSPECTED", "RECOVERING", "UNKNOWN"})})
+    return {"summary": {"total": len(services), **{k.lower(): v for k, v in counts.items()},
+        "devices": len(by_device)}, "devices": by_device,
+        "attention": [{**_service(x), "device_name": devices[x.device_id].name} for x in services
+            if x.monitor_state in {"DOWN", "SUSPECTED", "RECOVERING", "UNKNOWN"}][:20],
+        "recent": [{**_service(x), "device_name": devices[x.device_id].name} for x in services[:20]]}
+
+
+@router.get("/services/topology")
+async def services_topology(db: AsyncSession = Depends(get_db)):
+    services = (await db.execute(select(DiscoveredService).where(
+        DiscoveredService.monitored.is_(True)).order_by(DiscoveredService.device_id, DiscoveredService.display_name))).scalars().all()
+    device_ids = {x.device_id for x in services}
+    devices = (await db.execute(select(Device).where(Device.id.in_(device_ids)))).scalars().all() if device_ids else []
+    return {"devices": [{"id": x.id, "name": x.name, "ip_address": x.ip_address, "status": x.status.value,
+        "location": x.location} for x in devices], "services": [_service(x) for x in services],
+        "edges": [{"source": f"device-{x.device_id}", "target": f"service-{x.id}"} for x in services]}
+
+
 @router.post("/devices/{device_id}/services/discover")
 async def discover_services(device_id: int, db: AsyncSession = Depends(get_db)):
     device = await db.get(Device, device_id)

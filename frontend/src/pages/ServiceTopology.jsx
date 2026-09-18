@@ -1,0 +1,13 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { Activity, Maximize2, RefreshCw, Server } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import api from '../api/client';
+import { getApiErrorMessage } from '../utils/errors';
+
+export default function ServiceTopology() {
+  const [params,setParams]=useSearchParams(); const [data,setData]=useState({devices:[],services:[]}); const [error,setError]=useState(''); const [loading,setLoading]=useState(true);
+  const selected=params.get('device')||''; const load=()=>{setLoading(true);api.get('/services/topology').then(r=>setData(r.data)).catch(e=>setError(getApiErrorMessage(e))).finally(()=>setLoading(false));}; useEffect(load,[]);
+  const devices=useMemo(()=>selected?data.devices.filter(x=>String(x.id)===selected):data.devices,[data,selected]);
+  const fullscreen=()=>document.querySelector('.service-topology-board')?.requestFullscreen?.();
+  return <div className="data-page"><div className="page-title"><div><h2>Service Topology</h2><p>Device-to-service relationships and live operational state.</p></div><div className="row-actions"><select className="form-select compact" value={selected} onChange={e=>setParams(e.target.value?{device:e.target.value}:{})}><option value="">All monitored devices</option>{data.devices.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select><button className="btn btn-secondary" onClick={load}><RefreshCw size={15} className={loading?'spin':''}/>Refresh</button><button className="btn btn-secondary" onClick={fullscreen}><Maximize2 size={15}/>Fullscreen</button></div></div>{error&&<div className="notice error">{error}</div>}<section className="glass-card service-topology-board">{!devices.length?<div className="service-placeholder"><Activity size={38}/><strong>No monitored service topology</strong><span>Discover and select services first.</span></div>:devices.map(device=>{const services=data.services.filter(x=>x.device_id===device.id);return <article className="service-topology-group" key={device.id}><div className="service-topology-root"><Server size={22}/><div><strong>{device.name}</strong><small>{device.ip_address||device.location}</small></div><span className={`badge badge-${device.status==='ONLINE'?'online':'offline'}`}>{device.status}</span></div><div className="service-topology-trunk"/><div className="service-topology-children">{services.map(service=><div className={`service-topology-child state-${service.monitor_state.toLowerCase()}`} key={service.id}><span className="service-health-dot"/><div><strong>{service.display_name}</strong><small>{service.name} · {service.state}</small></div><b>{service.monitor_state}</b></div>)}</div></article>})}</section></div>;
+}
