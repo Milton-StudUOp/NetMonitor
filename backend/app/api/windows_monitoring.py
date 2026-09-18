@@ -69,6 +69,17 @@ async def services_topology(db: AsyncSession = Depends(get_db)):
         "edges": [{"source": f"device-{x.device_id}", "target": f"service-{x.id}"} for x in services]}
 
 
+@router.get("/services/inventory")
+async def monitored_services_inventory(db: AsyncSession = Depends(get_db)):
+    services = (await db.execute(select(DiscoveredService).where(
+        DiscoveredService.monitored.is_(True)).order_by(
+        DiscoveredService.device_id, DiscoveredService.display_name))).scalars().all()
+    device_ids = {x.device_id for x in services}
+    devices = {x.id: x for x in (await db.execute(select(Device).where(Device.id.in_(device_ids)))).scalars().all()} if device_ids else {}
+    return [{**_service(item), "device_name": devices[item.device_id].name,
+        "ip_address": devices[item.device_id].ip_address} for item in services if item.device_id in devices]
+
+
 @router.post("/devices/{device_id}/services/discover")
 async def discover_services(device_id: int, db: AsyncSession = Depends(get_db)):
     device = await db.get(Device, device_id)

@@ -102,7 +102,7 @@ export default function Sidebar({ user }) {
         })}
         <div className={`sidebar-nav-group ${servicesActive?'active':''}`}>
           <button className="sidebar-nav-group-toggle" onClick={()=>setServicesOpen(value=>!value)} aria-expanded={servicesOpen}><Activity size={18}/><span>Services Monitoring</span><ChevronDown size={15} className={servicesOpen?'open':''}/></button>
-          {servicesOpen&&<div className="sidebar-nav-children"><NavLink to="/service-monitoring">Service Monitoring</NavLink>{user?.role!=='VIEWER'&&<NavLink to="/service-discovery"><ScanSearch size={14}/>Discover Windows Services</NavLink>}<NavLink to="/service-topology"><GitBranch size={14}/>Service Topology</NavLink></div>}
+          {servicesOpen&&<div className="sidebar-nav-children"><NavLink to="/service-monitoring"><Activity size={14}/>Service Monitoring</NavLink>{user?.role!=='VIEWER'&&<NavLink to="/service-discovery"><ScanSearch size={14}/>Discover Windows Services</NavLink>}<NavLink to="/service-topology"><GitBranch size={14}/>Service Topology</NavLink></div>}
         </div>
       </nav>
     </aside>
