@@ -21,9 +21,14 @@ const NODE_WIDTH = 250;
 const HORIZONTAL_GAP = 110;
 const VERTICAL_GAP = 190;
 const RETURN_VIEW_KEY = 'netmonitor.topology.return-view';
+const VIEWPORT_KEY = 'netmonitor.topology.viewport';
 
 function readReturnView() {
   try { return JSON.parse(sessionStorage.getItem(RETURN_VIEW_KEY) || 'null'); }
+  catch { return null; }
+}
+function readViewport() {
+  try { return JSON.parse(sessionStorage.getItem(VIEWPORT_KEY) || 'null'); }
   catch { return null; }
 }
 function prepareEdges(edges) {
@@ -244,6 +249,7 @@ const CustomDeviceNode = ({ data = {} }) => {
 export default function TopologyGraph({ graphData }) {
   const navigate = useNavigate();
   const returnViewRef = useRef(readReturnView());
+  const savedViewportRef = useRef(returnViewRef.current?.viewport || readViewport());
   const nodeTypes = useMemo(() => ({ customDevice: CustomDeviceNode }), []);
   const edgeTypes = useMemo(() => ({ topologyEdge: TopologyEdge }), []);
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
@@ -469,20 +475,22 @@ export default function TopologyGraph({ graphData }) {
           onEdgesChange={onEdgesChange}
           onNodeDoubleClick={(_event, node) => openDeviceMetrics(node)}
           onNodeDragStop={handleNodeDragStop}
+          onMoveEnd={(_event, viewport) => { savedViewportRef.current = viewport; try { sessionStorage.setItem(VIEWPORT_KEY, JSON.stringify(viewport)); } catch {} }}
           nodesDraggable={layoutMode === 'free'}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           onInit={(instance) => {
             flowInstanceRef.current = instance;
             const returnView = returnViewRef.current;
-            if (returnView?.viewport && Number.isFinite(returnView.viewport.zoom)) {
+            const viewport = returnView?.viewport || savedViewportRef.current;
+            if (viewport && Number.isFinite(viewport.zoom)) {
               setTimeout(() => {
-                instance.setViewport(returnView.viewport, { duration:0 });
-                sessionStorage.removeItem(RETURN_VIEW_KEY);
+                instance.setViewport(viewport, { duration:0 });
+                if (returnView?.viewport) sessionStorage.removeItem(RETURN_VIEW_KEY);
               }, 80);
             }
           }}
-          fitView={!returnViewRef.current}
+          fitView={!savedViewportRef.current}
           fitViewOptions={{ padding: 0.2 }}
           minZoom={0.35}
         >
