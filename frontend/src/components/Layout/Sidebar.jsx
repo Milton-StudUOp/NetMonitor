@@ -20,20 +20,18 @@ import {
 
 export default function Sidebar({ user }) {
   const location=useLocation();
+  const networkPaths=['/topology','/redundancy','/devices','/links','/discovery'];
+  const networkActive=networkPaths.some(path=>location.pathname===path||location.pathname.startsWith(`${path}/`));
+  const [networkOpen,setNetworkOpen]=useState(networkActive);
   const servicesActive=location.pathname.startsWith('/service-');
   const [servicesOpen,setServicesOpen]=useState(servicesActive);
   const metricsActive=location.pathname.startsWith('/metrics-');
   const [metricsOpen,setMetricsOpen]=useState(metricsActive);
   const navItems = [
     { to: '/', label: 'Dashboard', icon: LayoutDashboard },
-    { to: '/topology', label: 'Topology', icon: GitBranch },
-    { to: '/redundancy', label: 'Redundancy', icon: GitFork },
     { to: '/alerts', label: 'Alerts', icon: AlertTriangle },
-    { to: '/devices', label: 'Devices', icon: Server },
-    { to: '/links', label: 'Links', icon: Network },
     { to: '/history', label: 'History', icon: History },
     { to: '/reports', label: 'Reports', icon: FileText },
-    ...(user?.role !== 'VIEWER' ? [{ to: '/discovery', label: 'Discovery', icon: Radar }] : []),
     ...(user?.role === 'ADMINISTRATOR' ? [{ to: '/settings', label: 'Settings', icon: Settings }] : []),
     ...(user?.role === 'ADMINISTRATOR' ? [{ to: '/system-health', label: 'System Health', icon: HeartPulse }] : []),
   ];
@@ -103,6 +101,10 @@ export default function Sidebar({ user }) {
             </NavLink>
           );
         })}
+        <div className={`sidebar-nav-group ${networkActive?'active':''}`}>
+          <button className="sidebar-nav-group-toggle" onClick={()=>setNetworkOpen(value=>!value)} aria-expanded={networkOpen}><Network size={18}/><span>Network Monitoring</span><ChevronDown size={15} className={networkOpen?'open':''}/></button>
+          {networkOpen&&<div className="sidebar-nav-children"><NavLink to="/topology"><GitBranch size={14}/>Topology</NavLink><NavLink to="/redundancy"><GitFork size={14}/>Redundancy</NavLink><NavLink to="/devices"><Server size={14}/>Devices</NavLink><NavLink to="/links"><Network size={14}/>Links</NavLink>{user?.role!=='VIEWER'&&<NavLink to="/discovery"><Radar size={14}/>Discovery</NavLink>}</div>}
+        </div>
         <div className={`sidebar-nav-group ${servicesActive?'active':''}`}>
           <button className="sidebar-nav-group-toggle" onClick={()=>setServicesOpen(value=>!value)} aria-expanded={servicesOpen}><Activity size={18}/><span>Services Monitoring</span><ChevronDown size={15} className={servicesOpen?'open':''}/></button>
           {servicesOpen&&<div className="sidebar-nav-children"><NavLink to="/service-monitoring"><Activity size={14}/>Service Monitoring</NavLink>{user?.role!=='VIEWER'&&<NavLink to="/service-discovery"><ScanSearch size={14}/>Discover Windows Services</NavLink>}<NavLink to="/service-topology"><GitBranch size={14}/>Service Topology</NavLink></div>}
