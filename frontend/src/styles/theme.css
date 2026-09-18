@@ -46,4 +46,6 @@ html,body,#root{background:var(--bg-dark);color:var(--text-main)}
 [data-theme="light"] .service-node,[data-theme="light"] .service-policy{background:var(--surface-subtle)}
 [data-theme="light"] .pagination-controls button{background:#fff}[data-theme="light"] .pagination-controls button:hover:not(:disabled){color:#1d4ed8;background:#eff6ff}
 [data-theme="light"] .filter-panel-title>button:hover{color:#1d4ed8}
+[data-theme="light"] .filter-grid input[type="date"]{color-scheme:light}
+[data-theme="light"] .incident-card{box-shadow:0 5px 16px rgba(15,23,42,.06)}
 @media(max-width:700px){.theme-selector select{max-width:76px}.app-header{gap:12px}}
