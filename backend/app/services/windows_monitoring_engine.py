@@ -25,7 +25,7 @@ def service_state_transition(current: str, healthy: bool, failures: int, success
             "UP" if successes >= recovery_threshold else current)
     else:
         successes = 0; failures += 1
-        state = "DOWN" if failures >= failure_threshold else "SUSPECTED"
+        state = "DOWN"
     return state, failures, successes
 
 

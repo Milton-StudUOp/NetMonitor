@@ -15,7 +15,7 @@ export default function ServiceConfigModal({ service, deviceName, onClose, onSav
     setForm({
       expected_state: service.expected_state || 'running',
       check_interval: service.check_interval || 60,
-      failure_threshold: service.failure_threshold || 3,
+      failure_threshold: 1,
       recovery_threshold: service.recovery_threshold || 2,
       severity: service.severity || 'CRITICAL',
       notifications_enabled: service.notifications_enabled ?? true,
@@ -44,7 +44,6 @@ export default function ServiceConfigModal({ service, deviceName, onClose, onSav
       <div className="service-policy service-policy-modal">
         <Field label="Expected state"><select className="form-select" value={form.expected_state} onChange={e=>update('expected_state',e.target.value)}><option value="running">Running</option><option value="stopped">Stopped</option></select></Field>
         <Field label="Interval (seconds)"><input className="form-input" type="number" min="30" value={form.check_interval} onChange={e=>update('check_interval',Number(e.target.value))}/></Field>
-        <Field label="Failures before alert"><input className="form-input" type="number" min="1" value={form.failure_threshold} onChange={e=>update('failure_threshold',Number(e.target.value))}/></Field>
         <Field label="Successes before recovery"><input className="form-input" type="number" min="1" value={form.recovery_threshold} onChange={e=>update('recovery_threshold',Number(e.target.value))}/></Field>
         <Field label="Severity"><select className="form-select" value={form.severity} onChange={e=>update('severity',e.target.value)}><option>INFORMATION</option><option>WARNING</option><option>CRITICAL</option></select></Field>
       </div>

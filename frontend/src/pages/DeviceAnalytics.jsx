@@ -55,7 +55,7 @@ function WindowsMonitoring({ device }) {
   const [result, setResult] = useState(null); const [busy, setBusy] = useState(''); const [notice, setNotice] = useState('');
   const [services,setServices]=useState([]); const [selected,setSelected]=useState(new Set()); const [search,setSearch]=useState('');
   const [stateFilter,setStateFilter]=useState(''); const [modeFilter,setModeFilter]=useState(''); const [health,setHealth]=useState(null); const [metrics,setMetrics]=useState([]); const [history,setHistory]=useState([]); const [profiles,setProfiles]=useState([]);
-  const [policy,setPolicy]=useState({expected_state:'running',check_interval:60,failure_threshold:3,recovery_threshold:2,severity:'CRITICAL',notifications_enabled:true});
+  const [policy,setPolicy]=useState({expected_state:'running',check_interval:60,failure_threshold:1,recovery_threshold:2,severity:'CRITICAL',notifications_enabled:true});
   const refreshMonitoring=()=>device?.id&&Promise.all([api.get(`/devices/${device.id}/services`),api.get(`/devices/${device.id}/operational-health`),api.get(`/devices/${device.id}/metrics?limit=20`),api.get(`/devices/${device.id}/services/history?limit=50`),api.get('/monitoring-profiles')]).then(([s,h,m,x,p])=>{setServices(s.data);setHealth(h.data);setMetrics(m.data);setHistory(x.data);setProfiles(p.data);}).catch(()=>{});
   useEffect(() => {
     if (!device?.id) return;

@@ -97,12 +97,9 @@ async def test_extended_metrics_preserve_normalized_collections():
     assert result["events"][0]["event_code"] == 1
 
 
-def test_service_state_requires_thresholds_and_recovers_gradually():
+def test_service_state_goes_down_immediately_and_recovers_gradually():
     state, failures, successes = service_state_transition("UP", False, 0, 2, 3, 2)
-    assert (state, failures, successes) == ("SUSPECTED", 1, 0)
-    state, failures, successes = service_state_transition(state, False, failures, successes, 3, 2)
-    state, failures, successes = service_state_transition(state, False, failures, successes, 3, 2)
-    assert state == "DOWN"
+    assert (state, failures, successes) == ("DOWN", 1, 0)
     state, failures, successes = service_state_transition(state, True, failures, successes, 3, 2)
     assert state == "RECOVERING"
     state, failures, successes = service_state_transition(state, True, failures, successes, 3, 2)
