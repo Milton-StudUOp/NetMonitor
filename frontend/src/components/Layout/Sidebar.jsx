@@ -58,10 +58,10 @@ export default function Sidebar({ user }) {
         padding: '0 8px',
       }}>
         <div style={{
-          width: '36px',
-          height: '36px',
-          minWidth: '36px',
-          flex: '0 0 36px',
+          width: '48px',
+          height: '48px',
+          minWidth: '48px',
+          flex: '0 0 48px',
           borderRadius: '10px',
           background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
           display: 'flex',
@@ -69,7 +69,7 @@ export default function Sidebar({ user }) {
           justifyContent: 'center',
           boxShadow: '0 0 15px rgba(59, 130, 246, 0.4)',
         }}>
-          <Activity size={22} color="#fff" />
+          <Activity size={27} color="#fff" />
         </div>
         <div style={{ minWidth: 0 }}>
           <h2 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-main)', letterSpacing: '-0.02em' }}>
