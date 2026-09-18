@@ -25,7 +25,9 @@ Connections registered under **Settings → Databases** can be promoted with **U
 7. Validate every table inside the destination transaction before committing.
 8. Restore generated keys and deferred circular references.
 9. Store the encrypted selection in `backend/.active-database`.
-10. Restart the backend manually; monitoring remains paused after a successful promotion until restart.
+10. Switch the runtime engine to the validated destination and resume monitoring.
+
+User accounts are part of the migration, including password hashes, roles, account state, and valid authentication sessions. Passwords are not reset or exposed; the same credentials continue to work after promotion. Orphaned records are rejected by foreign-key validation instead of producing an inaccessible destination.
 
 The file is ignored by Git and contains no plaintext URL. Encryption depends on `SECRET_KEY`.
 

@@ -124,6 +124,9 @@ async def migrate_and_activate(source_engine: AsyncEngine, item: DatabaseConnect
                 "database_type": "SQLITE" if database.active_database_url.startswith("sqlite") else "ENVIRONMENT"})
         return {"status": "READY", "restart_required": True, "connection_id": item.id,
             "database_name": item.name, "database_type": item.database_type,
-            "migrated_records": sum(source_counts.values()), "tables_validated": len(source_counts), "activated_at": activated_at}
+            "migrated_records": sum(source_counts.values()), "tables_validated": len(source_counts),
+            "migrated_users": source_counts.get("user_accounts", 0),
+            "migrated_sessions": source_counts.get("auth_sessions", 0),
+            "activated_at": activated_at}
     finally:
         await target.dispose()

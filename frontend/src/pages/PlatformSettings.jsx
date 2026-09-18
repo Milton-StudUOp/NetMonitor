@@ -118,11 +118,11 @@ function Databases({ report }) {
   };
 
   const activate = async item => {
-    if (!confirm(`Migrate all data to "${item.name}" and make it the primary database? The destination database must be empty.`)) return;
+    if (!confirm(`Migrate all data to "${item.name}" and make it the primary database?\n\nUser accounts, password hashes, roles, and valid login sessions will be copied, so the same credentials will continue to work. The destination database must be empty.`)) return;
     setBusy(true);
     try {
       const r = await api.post(`/platform/databases/${item.id}/activate`);
-      report('success', `${r.data.migrated_records} records migrated and validated. Restart the backend to activate ${item.name}.`);
+      report('success', `${r.data.migrated_records} records migrated and validated, including ${r.data.migrated_users} user account(s) and ${r.data.migrated_sessions} active session(s). ${item.name} is now the primary database.`);
       await load();
     } catch (err) {
       report('error', getApiErrorMessage(err));
@@ -173,6 +173,7 @@ function Databases({ report }) {
       <div className="glass-card settings-panel">
         <h3>Configured Connections</h3>
         {runtime && <div className="current-database"><span>CURRENT PRIMARY DATABASE</span><strong>{runtime.name}</strong><small>{runtime.database_type}</small></div>}
+        <p className="muted">Promotion copies user accounts, password hashes, roles, and valid sessions. Existing credentials remain unchanged.</p>
         {!items.length ? <p className="muted">No connections configured. Local SQLite remains the primary database.</p> : items.map(item => <div className="integration-row" key={item.id}>
           <div><strong>{item.name}</strong><span>{item.database_type} · {item.host || item.database_name}</span></div>
           <span className={`badge badge-${runtime?.connection_id===item.id?'online':item.last_status==='FAILED'?'offline':'unknown'}`}>{runtime?.connection_id===item.id?'PRIMARY':item.last_status}</span>

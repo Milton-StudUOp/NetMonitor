@@ -29,6 +29,11 @@ def _create_engine(url: str):
         @event.listens_for(eng.sync_engine, "connect")
         def set_sqlite_pragma(dbapi_connection, connection_record):
             cursor = dbapi_connection.cursor()
+            # SQLite does not enforce declared foreign keys unless this is
+            # enabled for every connection. Without it, orphaned rows can be
+            # created locally and later make a migration to stricter database
+            # engines fail.
+            cursor.execute("PRAGMA foreign_keys=ON")
             cursor.execute("PRAGMA journal_mode=WAL")
             cursor.execute("PRAGMA synchronous=NORMAL")
             cursor.execute("PRAGMA busy_timeout=30000")

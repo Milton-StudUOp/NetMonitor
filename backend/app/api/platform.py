@@ -153,6 +153,22 @@ async def activate_database(item_id: int, db: AsyncSession = Depends(get_db)):
         database.migration_in_progress = True
         await monitoring_engine.stop_and_wait()
         result = await migrate_and_activate(database.engine, item)
+        metadata = {
+            "connection_id": result["connection_id"],
+            "name": result["database_name"],
+            "database_type": result["database_type"],
+            "activated_at": result["activated_at"],
+            "rollback_available": True,
+        }
+        # The migration is already committed and the encrypted bootstrap file
+        # has been written. Switch the session factory immediately so the UI
+        # and all subsequent requests use the selected database without
+        # leaving the application locked until a manual restart.
+        await database.switch_runtime_engine(build_database_url(item), metadata)
+        database.migration_in_progress = False
+        await monitoring_engine.load_configuration()
+        monitoring_engine.start()
+        result.update({"status": "ACTIVE", "restart_required": False})
         return result
     except Exception as exc:
         database.migration_in_progress = False
