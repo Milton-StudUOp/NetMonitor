@@ -49,7 +49,7 @@ function EndpointCard({ role, type, target }) {
       borderRadius: '10px',
       border: `1px solid ${color}45`,
       borderLeft: `3px solid ${color}`,
-      background: 'rgba(15, 23, 42, 0.72)',
+      background: 'var(--surface-subtle)',
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
         <span style={{ display: 'flex', alignItems: 'center', gap: '7px', color: 'var(--text-muted)', fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
@@ -60,7 +60,7 @@ function EndpointCard({ role, type, target }) {
 
       {target ? (
         <>
-          <div style={{ color: '#fff', fontSize: '1rem', fontWeight: 700, marginBottom: '8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={target.name}>
+          <div style={{ color: 'var(--text-main)', fontSize: '1rem', fontWeight: 700, marginBottom: '8px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={target.name}>
             {target.name}
           </div>
           {isDevice ? (
@@ -119,7 +119,7 @@ export default function RedundancyPanel({ group }) {
           <GitFork size={20} color="var(--color-info)" style={{ marginTop: '2px' }} />
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '9px', flexWrap: 'wrap' }}>
-              <h3 style={{ fontSize: '1rem', fontWeight: 700, color: '#fff' }}>{group.name}</h3>
+              <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text-main)' }}>{group.name}</h3>
               <span style={{ padding: '3px 8px', borderRadius: '999px', background: 'rgba(59,130,246,.12)', border: '1px solid rgba(59,130,246,.3)', color: '#60a5fa', fontSize: '0.65rem', fontWeight: 700 }}>
                 {type === 'DEVICE' ? 'DEVICES' : 'LINKS'}
               </span>

@@ -33,7 +33,7 @@ export default function StatusCard({ title, count, icon: Icon, type = 'normal', 
         )}
       </div>
 
-      <div style={{ fontSize: '2rem', fontWeight: 700, color: '#fff', lineHeight: 1 }}>
+      <div style={{ fontSize: '2rem', fontWeight: 700, color: 'var(--text-main)', lineHeight: 1 }}>
         {count}
       </div>
 

@@ -175,7 +175,7 @@ export default function Devices({ user }) {
       {/* Action Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
         <div>
-          <h2 style={{ fontSize: '1.35rem', color: '#fff', fontWeight: 700, letterSpacing: '-0.01em' }}>
+          <h2 style={{ fontSize: '1.35rem', color: 'var(--text-main)', fontWeight: 700, letterSpacing: '-0.01em' }}>
             Network Device Management
           </h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginTop: '2px' }}>
@@ -227,7 +227,7 @@ export default function Devices({ user }) {
         {filteredDevices.length === 0 ? (
           <div style={{ padding: '48px 24px', textAlign: 'center', color: 'var(--text-muted)' }}>
             <Server size={44} style={{ marginBottom: '16px', opacity: 0.4 }} />
-            <h4 style={{ color: '#fff', fontSize: '1rem', marginBottom: '6px' }}>No devices found</h4>
+            <h4 style={{ color: 'var(--text-main)', fontSize: '1rem', marginBottom: '6px' }}>No devices found</h4>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-dim)', maxWidth: '400px', margin: '0 auto' }}>
               {devices.length === 0
                 ? canManageDevices ? 'Start by clicking the "+ Add Device" button above to register your first switch or radio.' : 'No devices are currently available.'
@@ -261,7 +261,7 @@ export default function Devices({ user }) {
                       fontWeight: 600,
                       padding: '3px 8px',
                       borderRadius: '6px',
-                      background: 'rgba(255, 255, 255, 0.06)',
+                      background: 'var(--surface-subtle)',
                       border: '1px solid var(--border-color)',
                       color: 'var(--text-main)',
                     }}>

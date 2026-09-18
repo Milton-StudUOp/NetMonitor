@@ -23,7 +23,7 @@ export default function Topology() {
   return (
     <div>
       <div style={{ marginBottom: '20px' }}>
-        <h2 style={{ fontSize: '1.25rem', color: '#fff', fontWeight: 600 }}>
+        <h2 style={{ fontSize: '1.25rem', color: 'var(--text-main)', fontWeight: 600 }}>
           Network Topology View
         </h2>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>

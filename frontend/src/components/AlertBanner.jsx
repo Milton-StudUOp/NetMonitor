@@ -29,7 +29,7 @@ export default function AlertBanner({ alert, onResolve }) {
 
       <div style={{ flex: 1 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '4px' }}>
-          <h4 style={{ color: '#fff', fontSize: '0.95rem', fontWeight: 600 }}>
+          <h4 style={{ color: 'var(--text-main)', fontSize: '0.95rem', fontWeight: 600 }}>
             {alert.title}
           </h4>
           <span className={`badge badge-${(alert.severity || 'INFORMATION').toLowerCase()}`}>

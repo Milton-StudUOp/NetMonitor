@@ -182,7 +182,7 @@ export default function Redundancy({ user }) {
     <div className="data-page">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', gap: '16px', flexWrap: 'wrap' }}>
         <div>
-          <h2 style={{ fontSize: '1.35rem', color: '#fff', fontWeight: 700 }}>Redundancy Groups</h2>
+          <h2 style={{ fontSize: '1.35rem', color: 'var(--text-main)', fontWeight: 700 }}>Redundancy Groups</h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginTop: '2px' }}>
             Protect services with redundant devices or alternate link paths.
           </p>
@@ -201,7 +201,7 @@ export default function Redundancy({ user }) {
         {filteredGroups.length === 0 ? (
           <div style={{ padding: '48px 24px', textAlign: 'center', color: 'var(--text-muted)' }}>
             <GitFork size={44} style={{ marginBottom: '16px', opacity: 0.4 }} />
-            <h4 style={{ color: '#fff', marginBottom: '6px' }}>No groups registered</h4>
+            <h4 style={{ color: 'var(--text-main)', marginBottom: '6px' }}>No groups registered</h4>
             <p>Create redundancy between two devices, even if they do not have links yet.</p>
           </div>
         ) : (
@@ -209,7 +209,7 @@ export default function Redundancy({ user }) {
             <thead><tr><th>Group</th><th>Type</th><th>Primary</th><th>Secondary</th><th>Service</th><th>Status</th>{canManageRedundancy&&<th style={{ textAlign: 'right' }}>Actions</th>}</tr></thead>
             <tbody>{visibleGroups.map((group) => (
               <tr key={group.id}>
-                <td><div style={{ fontWeight: 600, color: '#fff' }}>{group.name}</div>{group.description && <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>{group.description}</div>}</td>
+                <td><div style={{ fontWeight: 600, color: 'var(--text-main)' }}>{group.name}</div>{group.description && <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>{group.description}</div>}</td>
                 <td>{group.redundancy_type === 'DEVICE' ? 'Devices' : 'Links'}</td>
                 <td>{targetName(group, 'primary')}</td>
                 <td>{targetName(group, 'secondary')}</td>

@@ -130,7 +130,7 @@ export default function Links({ user }) {
     <div className="data-page">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
         <div>
-          <h2 style={{ fontSize: '1.35rem', color: '#fff', fontWeight: 700, letterSpacing: '-0.01em' }}>
+          <h2 style={{ fontSize: '1.35rem', color: 'var(--text-main)', fontWeight: 700, letterSpacing: '-0.01em' }}>
             Communication Links
           </h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginTop: '2px' }}>
@@ -159,7 +159,7 @@ export default function Links({ user }) {
         {filteredLinks.length === 0 ? (
           <div style={{ padding: '48px 24px', textAlign: 'center', color: 'var(--text-muted)' }}>
             <Network size={44} style={{ marginBottom: '16px', opacity: 0.4 }} />
-            <h4 style={{ color: '#fff', fontSize: '1rem', marginBottom: '6px' }}>No links registered</h4>
+            <h4 style={{ color: 'var(--text-main)', fontSize: '1rem', marginBottom: '6px' }}>No links registered</h4>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-dim)', maxWidth: '440px', margin: '0 auto' }}>
               Register links between devices to build the topology map.
             </p>
@@ -181,7 +181,7 @@ export default function Links({ user }) {
               {visibleLinks.map((link) => (
                 <tr key={link.id}>
                   <td>
-                    <div style={{ fontWeight: 600, color: '#fff' }}>{link.name}</div>
+                    <div style={{ fontWeight: 600, color: 'var(--text-main)' }}>{link.name}</div>
                     {link.description && <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>{link.description}</div>}
                   </td>
                   <td>

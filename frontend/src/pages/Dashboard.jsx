@@ -84,7 +84,7 @@ export default function Dashboard() {
 
       {/* Redundancy Groups Overview */}
       <div style={{ marginBottom: '24px' }}>
-        <h2 style={{ fontSize: '1.1rem', fontWeight: 600, color: '#fff', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <h2 style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <ShieldCheck size={20} color="var(--color-info)" /> Real-Time Redundancy Status
         </h2>
         {redundancyGroups.length === 0 ? (
@@ -98,7 +98,7 @@ export default function Dashboard() {
 
       {/* Full-width topology */}
       <div>
-          <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#fff', marginBottom: '12px' }}>
+          <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '12px' }}>
             Link Topology Map
           </h3>
           <TopologyGraph graphData={topology} />

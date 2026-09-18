@@ -13,7 +13,7 @@ export default function LatencyChart({ data = [] }) {
   if (!data || data.length === 0) {
     return (
       <div className="glass-card" style={{ padding: '20px', minHeight: '260px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
-        <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#fff', marginBottom: '8px' }}>
+        <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '8px' }}>
           Link Latency and Performance (ms)
         </h3>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
@@ -27,7 +27,7 @@ export default function LatencyChart({ data = [] }) {
 
   return (
     <div className="glass-card" style={{ padding: '20px' }}>
-      <h3 style={{ fontSize: '1rem', fontWeight: 600, color: '#fff', marginBottom: '16px' }}>
+      <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '16px' }}>
         Link Latency and Performance (ms)
       </h3>
       <div style={{ width: '100%', height: 260 }}>
@@ -44,10 +44,10 @@ export default function LatencyChart({ data = [] }) {
             <YAxis stroke="var(--text-dim)" fontSize={12} unit="ms" />
             <Tooltip
               contentStyle={{
-                background: '#0f172a',
+                background: 'var(--bg-surface)',
                 borderColor: 'var(--border-color)',
                 borderRadius: '8px',
-                color: '#fff',
+                color: 'var(--text-main)',
               }}
             />
             <Area

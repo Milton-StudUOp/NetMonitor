@@ -237,7 +237,7 @@ const CustomDeviceNode = ({ data = {} }) => {
         </span>
       </div>
       {metricItems.length > 0 && <div title={metrics.collected_at ? `Collected ${new Date(metrics.collected_at).toLocaleString()}` : ''} style={{display:'grid',gridTemplateColumns:'repeat(2,minmax(0,1fr))',gap:'5px',marginTop:'9px',paddingTop:'8px',borderTop:'1px solid rgba(148,163,184,.2)',textAlign:'left'}}>
-        {metricItems.map(([label,value])=><div key={label} style={{display:'flex',justifyContent:'space-between',gap:'5px',padding:'3px 5px',borderRadius:'5px',background:'rgba(255,255,255,.035)',fontSize:'.64rem'}}><span style={{color:'#94a3b8'}}>{label}</span><b>{value}</b></div>)}
+        {metricItems.map(([label,value])=><div key={label} style={{display:'flex',justifyContent:'space-between',gap:'5px',padding:'3px 5px',borderRadius:'5px',background:'var(--surface-subtle)',fontSize:'.64rem'}}><span style={{color:'var(--text-muted)'}}>{label}</span><b>{value}</b></div>)}
       </div>}
       <Handle id="bottom" type="source" position={Position.Bottom} style={{ background: border }} />
       <Handle id="right" type="source" position={Position.Right} style={{ background: '#22d3ee' }} />
@@ -495,7 +495,7 @@ export default function TopologyGraph({ graphData }) {
           minZoom={0.35}
         >
           <Background color="#1e293b" gap={16} />
-          <Controls style={{ background: '#0f172a', borderColor: 'var(--border-color)', color: '#fff' }} />
+          <Controls style={{ background: 'var(--bg-surface)', borderColor: 'var(--border-color)', color: 'var(--text-main)' }} />
         </ReactFlow>
       </ReactFlowProvider>
     </div>
