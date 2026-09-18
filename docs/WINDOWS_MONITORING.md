@@ -27,6 +27,11 @@ Service operations are a dedicated module in the main navigation:
 
 These workflows are deliberately kept out of the device metrics/analytics page.
 
+The assistant does not assume that only devices registered as `SERVER` can expose
+Windows services. Any online registered device with an IP address can be selected;
+the non-persistent connection test determines the actual platform and capabilities.
+Credentials and connection settings are saved only after that test returns `READY`.
+
 ## Security
 
 Passwords are encrypted using the existing `SECRET_KEY`-derived credential mechanism.

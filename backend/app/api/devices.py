@@ -227,6 +227,40 @@ async def test_windows_monitoring(device_id: int, db: AsyncSession = Depends(get
             service_discovery=False, status="FAILED", error_code=exc.code, message=str(exc), discovered_at=now)
 
 
+@router.post("/{device_id}/windows-monitoring/test-candidate", response_model=WindowsCapabilityRead)
+async def test_windows_monitoring_candidate(device_id: int, data: WindowsConnectionInput,
+                                            db: AsyncSession = Depends(get_db)):
+    """Test supplied settings without persisting credentials or connection configuration."""
+    device = await db.get(Device, device_id)
+    if not device: raise HTTPException(status_code=404, detail="Device not found")
+    if not device.ip_address: raise HTTPException(status_code=400, detail="Device has no IP address")
+    if device.status != DeviceStatus.ONLINE:
+        raise HTTPException(status_code=409, detail="Device must be online before remote monitoring is tested")
+    password = data.password
+    if not password:
+        stored = (await db.execute(select(DeviceMonitoringCredential).where(
+            DeviceMonitoringCredential.device_id == device_id,
+            DeviceMonitoringCredential.provider == "WINDOWS"))).scalar_one_or_none()
+        password = decrypt_secret(stored.encrypted_password) if stored else None
+    if not password: raise HTTPException(status_code=400, detail="Password is required to test this connection")
+    provider = WindowsMonitoringProvider(WinRMTransport(device.ip_address, data.username, password,
+        data.port, data.use_https, data.verify_certificate, data.authentication))
+    now = datetime.now(timezone.utc)
+    try:
+        detected = await provider.detect_capabilities()
+        return WindowsCapabilityRead(device_id=device.id, device_name=device.name, connectivity=True,
+            winrm=True, authentication=True, service_discovery=True, status="READY",
+            message="Connection verified. You can now save and continue.",
+            operating_system=detected.operating_system, powershell_version=detected.powershell_version,
+            provider_mode=detected.provider_mode, capabilities=detected.capabilities,
+            diagnostics=detected.diagnostics, discovered_at=now)
+    except WindowsMonitoringError as exc:
+        return WindowsCapabilityRead(device_id=device.id, device_name=device.name,
+            connectivity=exc.code not in {"WINRM_UNAVAILABLE", "CHECK_TIMEOUT"}, winrm=False,
+            authentication=exc.code not in {"AUTHENTICATION_FAILED", "WINRM_UNAVAILABLE", "CHECK_TIMEOUT"},
+            service_discovery=False, status="FAILED", error_code=exc.code, message=str(exc), discovered_at=now)
+
+
 @router.put("/{device_id}", response_model=DeviceRead)
 async def update_device(device_id: int, device_in: DeviceUpdate, db: AsyncSession = Depends(get_db)):
     device = await db.get(Device, device_id)
