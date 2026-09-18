@@ -8,7 +8,7 @@ from sqlalchemy import or_, select
 from app.database import async_session_factory
 from app.models.alert import Alert, AlertSeverity
 from app.models.device import Device, DeviceStatus
-from app.models.monitoring_provider import (DeviceMonitoringCredential, DiscoveredService,
+from app.models.monitoring_provider import (DeviceCapability, DeviceMonitoringCredential, DiscoveredService,
     ServiceCheckHistory, SystemMetricSnapshot)
 from app.security import decrypt_secret
 from app.services.notification.dispatcher import dispatch_persisted_notifications
@@ -52,9 +52,13 @@ class WindowsMonitoringEngine:
     async def run_due_checks(self):
         now = datetime.now(timezone.utc)
         async with async_session_factory() as db:
-            device_ids = (await db.execute(select(DiscoveredService.device_id).where(
+            service_device_ids = (await db.execute(select(DiscoveredService.device_id).where(
                 DiscoveredService.monitored.is_(True), or_(DiscoveredService.next_check_at.is_(None),
                 DiscoveredService.next_check_at <= now)).distinct())).scalars().all()
+            metric_device_ids = (await db.execute(select(DeviceCapability.device_id).where(
+                DeviceCapability.provider == "WINDOWS"))).scalars().all()
+        device_ids = set(service_device_ids)
+        device_ids.update(metric_device_ids)
         await asyncio.gather(*(self._check_device(device_id, now) for device_id in device_ids))
 
     async def _check_device(self, device_id: int, now: datetime):
@@ -64,9 +68,12 @@ class WindowsMonitoringEngine:
             services = (await db.execute(select(DiscoveredService).where(DiscoveredService.device_id == device_id,
                 DiscoveredService.monitored.is_(True), or_(DiscoveredService.next_check_at.is_(None),
                 DiscoveredService.next_check_at <= now)))).scalars().all()
+            capability = (await db.execute(select(DeviceCapability).where(DeviceCapability.device_id == device_id,
+                DeviceCapability.provider == "WINDOWS"))).scalar_one_or_none()
+            enabled_metrics = (capability.diagnostics or {}).get("enabled_metrics", []) if capability else []
             credential = (await db.execute(select(DeviceMonitoringCredential).where(
                 DeviceMonitoringCredential.device_id == device_id, DeviceMonitoringCredential.enabled.is_(True)))).scalar_one_or_none()
-            if not credential or not services: return
+            if not credential or (not services and not enabled_metrics): return
             password = decrypt_secret(credential.encrypted_password)
             if not password: return
             provider = WindowsMonitoringProvider(WinRMTransport(device.ip_address, credential.username, password,
@@ -77,11 +84,18 @@ class WindowsMonitoringEngine:
                 elapsed = round((perf_counter() - started) * 1000, 2)
                 for item in services: await self._apply_service_result(db, item, observed.get(item.name, "unknown"), None, elapsed, now)
                 last_metric = self._last_metric_check.get(device_id)
-                if not last_metric or now - last_metric >= timedelta(seconds=60):
+                if enabled_metrics and (not last_metric or now - last_metric >= timedelta(seconds=60)):
                     values = await provider.collect_system_metrics()
-                    db.add(SystemMetricSnapshot(device_id=device_id, cpu_percent=values.get("cpu_percent"),
-                        memory_percent=values.get("memory_percent"), uptime_seconds=values.get("uptime_seconds"),
-                        storage=values.get("storage") or [])); self._last_metric_check[device_id] = now
+                    allowed = set(enabled_metrics)
+                    details = {key: values.get(key) for key in ("network_interfaces", "network_adapters",
+                        "processes", "system_information", "events")}
+                    db.add(SystemMetricSnapshot(device_id=device_id,
+                        cpu_percent=values.get("cpu_percent") if "cpu" in allowed else None,
+                        memory_percent=values.get("memory_percent") if "memory" in allowed else None,
+                        uptime_seconds=values.get("uptime_seconds") if "uptime" in allowed else None,
+                        storage={"disks": values.get("storage") or [] if "storage" in allowed else [],
+                            **{key: value if key in allowed or (key == "network_adapters" and "network_interfaces" in allowed) else []
+                               for key, value in details.items()}})); self._last_metric_check[device_id] = now
             except (WindowsMonitoringError, asyncio.TimeoutError) as exc:
                 code = exc.code if isinstance(exc, WindowsMonitoringError) else "CHECK_TIMEOUT"
                 for item in services:

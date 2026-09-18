@@ -1,19 +1,29 @@
 from datetime import datetime, timezone
 from fnmatch import fnmatch
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.device import Device, DeviceStatus
-from app.models.monitoring_provider import (DeviceMonitoringCredential, DiscoveredService,
+from app.models.monitoring_provider import (DeviceCapability, DeviceMonitoringCredential, DiscoveredService,
     MonitoringProfile, ServiceCheckHistory, SystemMetricSnapshot)
 from app.schemas.monitoring_provider import MonitoringProfileInput, ServiceMonitoringUpdate
 from app.security import decrypt_secret
 from app.services.windows_monitoring import WinRMTransport, WindowsMonitoringError, WindowsMonitoringProvider
 
 router = APIRouter(prefix="/api", tags=["Windows monitoring"])
+
+
+def _metric_snapshot(item: SystemMetricSnapshot) -> dict:
+    details = item.storage if isinstance(item.storage, dict) else {"disks": item.storage or []}
+    return {"id": item.id, "cpu_percent": item.cpu_percent, "memory_percent": item.memory_percent,
+        "uptime_seconds": item.uptime_seconds, "storage": details.get("disks", []),
+        "network_interfaces": details.get("network_interfaces", []),
+        "network_adapters": details.get("network_adapters", []), "processes": details.get("processes", []),
+        "system_information": details.get("system_information", {}), "events": details.get("events", []),
+        "collected_at": item.collected_at}
 
 
 async def _provider(db: AsyncSession, device: Device) -> WindowsMonitoringProvider:
@@ -151,19 +161,62 @@ async def collect_metrics(device_id: int, db: AsyncSession = Depends(get_db)):
     if device.status != DeviceStatus.ONLINE: raise HTTPException(409, "Device must be online before metrics collection")
     try: values = await (await _provider(db, device)).collect_system_metrics()
     except WindowsMonitoringError as exc: raise HTTPException(409, {"code": exc.code, "message": str(exc)}) from exc
+    details = {key: values.get(key) for key in ("network_interfaces", "network_adapters", "processes",
+        "system_information", "events")}
     item = SystemMetricSnapshot(device_id=device_id, cpu_percent=values.get("cpu_percent"),
         memory_percent=values.get("memory_percent"), uptime_seconds=values.get("uptime_seconds"),
-        storage=values.get("storage") or [])
+        storage={"disks": values.get("storage") or [], **details})
     db.add(item); await db.commit(); await db.refresh(item)
-    return {"id": item.id, **values, "collected_at": item.collected_at}
+    return _metric_snapshot(item)
 
 
 @router.get("/devices/{device_id}/metrics")
 async def list_metrics(device_id: int, limit: int = Query(100, ge=1, le=1000), db: AsyncSession = Depends(get_db)):
     rows = (await db.execute(select(SystemMetricSnapshot).where(SystemMetricSnapshot.device_id == device_id)
         .order_by(SystemMetricSnapshot.collected_at.desc()).limit(limit))).scalars().all()
-    return [{"id": x.id, "cpu_percent": x.cpu_percent, "memory_percent": x.memory_percent,
-        "uptime_seconds": x.uptime_seconds, "storage": x.storage, "collected_at": x.collected_at} for x in rows]
+    return [_metric_snapshot(x) for x in rows]
+
+
+@router.get("/devices/{device_id}/metrics/capabilities")
+async def metric_capabilities(device_id: int, db: AsyncSession = Depends(get_db)):
+    device = await db.get(Device, device_id)
+    if not device: raise HTTPException(404, "Device not found")
+    try: capabilities = await (await _provider(db, device)).discover_metric_capabilities()
+    except WindowsMonitoringError as exc: raise HTTPException(409, {"code": exc.code, "message": str(exc)}) from exc
+    saved = (await db.execute(select(DeviceCapability).where(DeviceCapability.device_id == device_id,
+        DeviceCapability.provider == "WINDOWS"))).scalar_one_or_none()
+    enabled = (saved.diagnostics or {}).get("enabled_metrics", []) if saved else []
+    return {"device_id": device.id, "device_name": device.name, "capabilities": capabilities,
+        "enabled_metrics": enabled}
+
+
+@router.put("/devices/{device_id}/metrics/configuration")
+async def configure_metrics(device_id: int, payload: dict = Body(...), db: AsyncSession = Depends(get_db)):
+    device = await db.get(Device, device_id)
+    if not device: raise HTTPException(404, "Device not found")
+    available = await (await _provider(db, device)).discover_metric_capabilities()
+    selected = list(dict.fromkeys(payload.get("enabled_metrics") or []))
+    invalid = [key for key in selected if key not in available or not available[key]["supported"]]
+    if invalid: raise HTTPException(400, f"Unsupported metrics: {', '.join(invalid)}")
+    item = (await db.execute(select(DeviceCapability).where(DeviceCapability.device_id == device_id,
+        DeviceCapability.provider == "WINDOWS"))).scalar_one_or_none()
+    if not item:
+        item = DeviceCapability(device_id=device_id, provider="WINDOWS", platform="windows"); db.add(item)
+    item.diagnostics = {**(item.diagnostics or {}), "enabled_metrics": selected}
+    await db.commit()
+    return {"device_id": device_id, "enabled_metrics": selected}
+
+
+@router.get("/metrics/overview")
+async def metrics_overview(db: AsyncSession = Depends(get_db)):
+    devices = (await db.execute(select(Device).order_by(Device.name))).scalars().all()
+    result = []
+    for device in devices:
+        latest = (await db.execute(select(SystemMetricSnapshot).where(SystemMetricSnapshot.device_id == device.id)
+            .order_by(SystemMetricSnapshot.collected_at.desc()).limit(1))).scalar_one_or_none()
+        if latest: result.append({"device": {"id": device.id, "name": device.name,
+            "ip_address": device.ip_address, "status": device.status.value}, "latest": _metric_snapshot(latest)})
+    return result
 
 
 @router.get("/devices/{device_id}/operational-health")
@@ -178,7 +231,8 @@ async def operational_health(device_id: int, db: AsyncSession = Depends(get_db))
         "DEGRADED" if any(x.monitor_state in {"SUSPECTED", "RECOVERING", "UNKNOWN"} for x in services) else "UP")
     return {"device_id": device_id, "availability": device.status.value, "windows_services": service_state,
         "monitored_services": len(services), "cpu": latest.cpu_percent if latest else None,
-        "memory": latest.memory_percent if latest else None, "storage": latest.storage if latest else [],
+        "memory": latest.memory_percent if latest else None,
+        "storage": (_metric_snapshot(latest)["storage"] if latest else []),
         "operational_state": "DEGRADED" if device.status == DeviceStatus.ONLINE and service_state != "UP" else device.status.value}
 
 

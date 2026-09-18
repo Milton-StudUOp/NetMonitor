@@ -56,7 +56,11 @@ class WindowsMonitoringProvider(MonitoringProvider):
 $ErrorActionPreference='Stop'
 $os=Get-WmiObject Win32_OperatingSystem
 $ps=if($PSVersionTable){$PSVersionTable.PSVersion.ToString()}else{'1.0'}
-@{operating_system=$os.Caption; powershell_version=$ps} | ConvertTo-Json -Compress
+$classes=@{}
+foreach($item in @('Win32_Service','Win32_Processor','Win32_OperatingSystem','Win32_LogicalDisk','Win32_NetworkAdapterConfiguration','Win32_PerfFormattedData_PerfProc_Process','Win32_NTLogEvent')){
+  try{$null=Get-WmiObject $item -ErrorAction Stop | Select-Object -First 1;$classes[$item]=$true}catch{$classes[$item]=$false}
+}
+@{operating_system=$os.Caption;powershell_version=$ps;classes=$classes} | ConvertTo-Json -Compress -Depth 4
 """
 
     def __init__(self, transport: WinRMTransport): self.transport = transport
@@ -69,11 +73,29 @@ $ps=if($PSVersionTable){$PSVersionTable.PSVersion.ToString()}else{'1.0'}
         version = str(data.get("powershell_version") or "1.0")
         try: major = int(version.split(".", 1)[0])
         except ValueError: major = 1
+        classes = data.get("classes") or {}
+        available = lambda name, default=False: bool(classes.get(name, default))
         return CapabilityResult(data.get("operating_system"), version,
             "MODERN_CIM" if major >= 3 else "LEGACY_WMI",
-            {"services": True, "cpu": True, "memory": True, "storage": True,
-             "network_interfaces": True, "processes": True},
+            {"services": available("Win32_Service", True),
+             "cpu": available("Win32_Processor"),
+             "memory": available("Win32_OperatingSystem"),
+             "uptime": available("Win32_OperatingSystem"),
+             "storage": available("Win32_LogicalDisk"),
+             "network_interfaces": available("Win32_NetworkAdapterConfiguration"),
+             "processes": available("Win32_PerfFormattedData_PerfProc_Process"),
+             "system_information": available("Win32_OperatingSystem"),
+             "events": available("Win32_NTLogEvent")},
             {"transport": "winrm_https" if self.transport.endpoint.startswith("https") else "winrm_http"})
+
+    async def discover_metric_capabilities(self) -> dict[str, dict]:
+        detected = await self.detect_capabilities()
+        labels = {"cpu":"CPU usage", "memory":"Memory usage", "uptime":"System uptime",
+            "storage":"Disk usage and free space", "network_interfaces":"Network interfaces and traffic",
+            "processes":"Top processes", "system_information":"Windows system information",
+            "events":"Recent critical Windows events"}
+        return {key: {"supported": supported, "label": labels[key]} for key, supported in
+            detected.capabilities.items() if key != "services"}
 
     async def discover_services(self) -> list[dict]:
         raw = await self.transport.run_powershell(r"""
@@ -104,8 +126,13 @@ Get-WmiObject Win32_Service | Select-Object Name,DisplayName,State,StartMode,Des
 $ErrorActionPreference='Stop'
 $os=Get-WmiObject Win32_OperatingSystem
 $cpu=(Get-WmiObject Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average
-$disks=Get-WmiObject Win32_LogicalDisk -Filter "DriveType=3" | ForEach-Object {@{name=$_.DeviceID;size=[int64]$_.Size;free=[int64]$_.FreeSpace}}
-@{cpu_percent=[double]$cpu;memory_percent=[math]::Round((1-($os.FreePhysicalMemory/$os.TotalVisibleMemorySize))*100,2);uptime_seconds=[int64]((Get-Date)-$os.ConvertToDateTime($os.LastBootUpTime)).TotalSeconds;storage=@($disks)} | ConvertTo-Json -Compress -Depth 4
+$disks=Get-WmiObject Win32_LogicalDisk -Filter "DriveType=3" | ForEach-Object {@{name=$_.DeviceID;label=$_.VolumeName;file_system=$_.FileSystem;size_bytes=[int64]$_.Size;free_bytes=[int64]$_.FreeSpace;used_percent=if($_.Size){[math]::Round((1-($_.FreeSpace/$_.Size))*100,2)}else{0}}}
+$net=Get-WmiObject Win32_PerfFormattedData_Tcpip_NetworkInterface -ErrorAction SilentlyContinue | ForEach-Object {@{name=$_.Name;bytes_received_per_sec=[int64]$_.BytesReceivedPersec;bytes_sent_per_sec=[int64]$_.BytesSentPersec;packets_received_errors=[int64]$_.PacketsReceivedErrors;packets_outbound_errors=[int64]$_.PacketsOutboundErrors}}
+$adapters=Get-WmiObject Win32_NetworkAdapterConfiguration -Filter "IPEnabled=True" -ErrorAction SilentlyContinue | ForEach-Object {@{description=$_.Description;mac_address=$_.MACAddress;ip_addresses=@($_.IPAddress);gateways=@($_.DefaultIPGateway)}}
+$processes=Get-WmiObject Win32_PerfFormattedData_PerfProc_Process -ErrorAction SilentlyContinue | Where-Object {$_.Name -ne '_Total' -and $_.Name -ne 'Idle'} | Sort-Object PercentProcessorTime -Descending | Select-Object -First 20 | ForEach-Object {@{name=$_.Name;process_id=[int]$_.IDProcess;cpu_percent=[double]$_.PercentProcessorTime;working_set_bytes=[int64]$_.WorkingSetPrivate}}
+$events=Get-WmiObject Win32_NTLogEvent -Filter "Logfile='System' AND (EventType=1 OR EventType=2)" -ErrorAction SilentlyContinue | Select-Object -First 20 | ForEach-Object {@{source=$_.SourceName;event_code=[int]$_.EventCode;type=[int]$_.EventType;message=$_.Message;time_generated=$_.TimeGenerated}}
+$system=@{caption=$os.Caption;version=$os.Version;architecture=$os.OSArchitecture;computer_name=$os.CSName;manufacturer=(Get-WmiObject Win32_ComputerSystem).Manufacturer;model=(Get-WmiObject Win32_ComputerSystem).Model;last_boot=$os.LastBootUpTime}
+@{cpu_percent=[double]$cpu;memory_percent=[math]::Round((1-($os.FreePhysicalMemory/$os.TotalVisibleMemorySize))*100,2);uptime_seconds=[int64]((Get-Date)-$os.ConvertToDateTime($os.LastBootUpTime)).TotalSeconds;storage=@($disks);network_interfaces=@($net);network_adapters=@($adapters);processes=@($processes);system_information=$system;events=@($events)} | ConvertTo-Json -Compress -Depth 6
 """)
         try: return json.loads(raw)
         except ValueError as exc: raise WindowsMonitoringError("DISCOVERY_FAILED", "Windows returned an invalid metrics response") from exc

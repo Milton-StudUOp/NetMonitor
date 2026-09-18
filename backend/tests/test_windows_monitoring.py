@@ -69,6 +69,34 @@ async def test_system_metrics_are_normalized():
     assert metrics["uptime_seconds"] == 900
 
 
+@pytest.mark.asyncio
+async def test_capability_discovery_returns_only_reported_windows_features():
+    provider = WindowsMonitoringProvider(FakeTransport(
+        '{"operating_system":"Windows Server","powershell_version":"5.1","classes":'
+        '{"Win32_Service":true,"Win32_Processor":true,"Win32_OperatingSystem":true,'
+        '"Win32_LogicalDisk":false,"Win32_NetworkAdapterConfiguration":true,'
+        '"Win32_PerfFormattedData_PerfProc_Process":false,"Win32_NTLogEvent":true}}'))
+    result = await provider.discover_metric_capabilities()
+    assert result["cpu"]["supported"] is True
+    assert result["storage"]["supported"] is False
+    assert result["network_interfaces"]["supported"] is True
+    assert result["processes"]["supported"] is False
+    assert result["events"]["supported"] is True
+
+
+@pytest.mark.asyncio
+async def test_extended_metrics_preserve_normalized_collections():
+    provider = WindowsMonitoringProvider(FakeTransport(
+        '{"cpu_percent":10,"memory_percent":20,"uptime_seconds":30,"storage":[{"name":"C:"}],'
+        '"network_interfaces":[{"name":"Ethernet"}],"processes":[{"name":"sqlservr"}],'
+        '"system_information":{"caption":"Windows"},"events":[{"event_code":1}]}'))
+    result = await provider.collect_system_metrics()
+    assert result["storage"][0]["name"] == "C:"
+    assert result["network_interfaces"][0]["name"] == "Ethernet"
+    assert result["processes"][0]["name"] == "sqlservr"
+    assert result["events"][0]["event_code"] == 1
+
+
 def test_service_state_requires_thresholds_and_recovers_gradually():
     state, failures, successes = service_state_transition("UP", False, 0, 2, 3, 2)
     assert (state, failures, successes) == ("SUSPECTED", 1, 0)

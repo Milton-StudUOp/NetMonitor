@@ -23,3 +23,6 @@ class MonitoringProvider(ABC):
 
     @abstractmethod
     async def collect_system_metrics(self) -> dict: ...
+
+    @abstractmethod
+    async def discover_metric_capabilities(self) -> dict[str, dict]: ...

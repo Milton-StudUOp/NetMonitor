@@ -35,7 +35,7 @@ export default function ServiceConfigModal({ service, deviceName, onClose, onSav
   };
 
   return <div className="modal-overlay" role="presentation" onMouseDown={e=>e.target===e.currentTarget&&onClose()}>
-    <section className="glass-card service-config-modal" role="dialog" aria-modal="true" aria-labelledby="service-config-title">
+    <section className="glass-card service-config-modal" style={{width:'min(1040px, calc(100vw - 48px))',padding:'28px'}} role="dialog" aria-modal="true" aria-labelledby="service-config-title">
       <div className="modal-header"><div><h3 id="service-config-title">Configure monitored service</h3><p>{service.display_name} · {deviceName || service.device_name}</p></div><button className="icon-button" onClick={onClose} aria-label="Close"><X size={18}/></button></div>
       {error&&<div className="notice error">{error}</div>}
       <div className="service-config-identity"><div><span>Service name</span><strong>{service.name}</strong></div><div><span>Observed state</span><strong>{service.state}</strong></div><div><span>Start mode</span><strong>{service.start_mode}</strong></div></div>
