@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from ipaddress import ip_address
+import os
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
@@ -26,7 +27,7 @@ def _reject_loopback_windows_target(device: Device) -> None:
         loopback = ip_address(device.ip_address).is_loopback
     except ValueError:
         loopback = device.ip_address.lower() == "localhost"
-    if loopback:
+    if loopback and os.name != "nt":
         raise HTTPException(status_code=400, detail=(
             "127.0.0.1/localhost points to the NetMonitor backend itself. "
             "Configure this device with the Windows host's reachable LAN address or DNS name."
