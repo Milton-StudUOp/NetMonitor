@@ -43,5 +43,7 @@ async def authenticate_token(db, token: str) -> tuple[UserAccount, AuthSession] 
     if not row: return None
     session, user = row; now = datetime.now(timezone.utc); expiry = session.expires_at.replace(tzinfo=timezone.utc) if session.expires_at.tzinfo is None else session.expires_at
     if expiry <= now: await db.delete(session); await db.commit(); return None
-    session.last_seen_at = now
+    last_seen = session.last_seen_at.replace(tzinfo=timezone.utc) if session.last_seen_at.tzinfo is None else session.last_seen_at
+    if (now - last_seen).total_seconds() >= 60:
+        session.last_seen_at = now
     return user, session

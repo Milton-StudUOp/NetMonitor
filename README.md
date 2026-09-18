@@ -31,7 +31,7 @@ Requirements: Python 3.12+, Node.js 20+, and npm 10+.
 ```powershell
 git clone https://github.com/Milton-StudUOp/NetMonitor.git
 cd NetMonitor
-git switch premium
+git switch dev
 
 cd backend
 python -m venv venv

@@ -46,9 +46,13 @@ pnpm-debug.log*
 # Local databases and runtime data
 *.db
 *.db-journal
+*.db-wal
+*.db-shm
 *.sqlite
 *.sqlite3
 *.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
 *.pid
 *.pid.lock
 *.log

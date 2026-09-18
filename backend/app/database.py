@@ -10,19 +10,30 @@ settings = get_settings()
 active_database_url, active_database_metadata = load_active_database(settings.DATABASE_URL, settings.SECRET_KEY)
 migration_in_progress = False
 
+from sqlalchemy import event
+
 def _create_engine(url: str):
     # SQL statement logging can expose credentials and personal data through
     # bound parameters, and is prohibitively noisy for monitoring workloads.
     kwargs = {"echo": False, "hide_parameters": True}
     if url.startswith("sqlite"):
-        kwargs["connect_args"] = {"check_same_thread": False}
+        kwargs["connect_args"] = {"check_same_thread": False, "timeout": 30.0}
     else:
         kwargs.update({"pool_pre_ping": True, "pool_size": 10, "max_overflow": 20})
         if url.startswith("mysql"):
             kwargs["connect_args"] = {"init_command": "SET time_zone = '+00:00'"}
         elif url.startswith("postgresql"):
             kwargs["connect_args"] = {"server_settings": {"timezone": "UTC"}}
-    return create_async_engine(url, **kwargs)
+    eng = create_async_engine(url, **kwargs)
+    if url.startswith("sqlite"):
+        @event.listens_for(eng.sync_engine, "connect")
+        def set_sqlite_pragma(dbapi_connection, connection_record):
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.execute("PRAGMA busy_timeout=30000")
+            cursor.close()
+    return eng
 
 
 engine = _create_engine(active_database_url)

@@ -104,7 +104,12 @@ async def authentication(request: Request, call_next):
         response = await call_next(request)
         if getattr(request.state, "logout_requested", False):
             await db.delete(session)
-        await db.commit()
+        if bool(db.dirty or db.new or db.deleted) or getattr(request.state, "logout_requested", False):
+            try:
+                await db.commit()
+            except Exception as exc:
+                await db.rollback()
+                logger.warning("auth_session_commit_suppressed", error=str(exc))
         return response
 
 # Include Routers
