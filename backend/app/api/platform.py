@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile, status
 from sqlalchemy import DateTime as SQLDateTime, delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -164,8 +165,21 @@ async def activate_database(item_id: int, db: AsyncSession = Depends(get_db)):
 
 @router.post("/databases", response_model=DatabaseConnectionRead, status_code=201)
 async def create_database(data: DatabaseConnectionInput, db: AsyncSession = Depends(get_db)):
-    values = data.model_dump(exclude={"password"}); values["encrypted_password"] = encrypt_secret(data.password)
-    item = DatabaseConnection(**values); db.add(item); await db.flush(); await _audit(db, "CREATE", "DATABASE", item.id, f"Database connection {item.name} created")
+    clean_name = data.name.strip()
+    existing = (await db.execute(select(DatabaseConnection).where(DatabaseConnection.name == clean_name))).scalar_one_or_none()
+    if existing:
+        raise HTTPException(409, f"A database connection named '{clean_name}' already exists.")
+    values = data.model_dump(exclude={"password"})
+    values["name"] = clean_name
+    values["encrypted_password"] = encrypt_secret(data.password)
+    item = DatabaseConnection(**values)
+    db.add(item)
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(409, f"A database connection named '{clean_name}' already exists.") from exc
+    await _audit(db, "CREATE", "DATABASE", item.id, f"Database connection {item.name} created")
     return _db_read(item)
 
 
@@ -173,8 +187,18 @@ async def create_database(data: DatabaseConnectionInput, db: AsyncSession = Depe
 async def update_database(item_id: int, data: DatabaseConnectionInput, db: AsyncSession = Depends(get_db)):
     item = await db.get(DatabaseConnection, item_id)
     if not item: raise HTTPException(404, "Database connection not found")
+    clean_name = data.name.strip()
+    existing = (await db.execute(select(DatabaseConnection).where(DatabaseConnection.name == clean_name, DatabaseConnection.id != item_id))).scalar_one_or_none()
+    if existing:
+        raise HTTPException(409, f"A database connection named '{clean_name}' already exists.")
     for key, value in data.model_dump(exclude={"password"}).items(): setattr(item, key, value)
+    item.name = clean_name
     if data.password: item.encrypted_password = encrypt_secret(data.password)
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(409, f"A database connection named '{clean_name}' already exists.") from exc
     await _audit(db, "UPDATE", "DATABASE", item.id, f"Database connection {item.name} updated")
     return _db_read(item)
 
@@ -211,7 +235,21 @@ async def list_data_sources(db: AsyncSession = Depends(get_db)):
 @router.post("/data-sources", response_model=DatabaseDataSourceRead, status_code=201)
 async def create_data_source(data: DatabaseDataSourceInput, db: AsyncSession = Depends(get_db)):
     if not await db.get(DatabaseConnection, data.connection_id): raise HTTPException(400, "Database connection not found")
-    item = DatabaseDataSource(**data.model_dump()); db.add(item); await db.flush(); await _audit(db, "CREATE", "DATA_SOURCE", item.id, f"Data source {item.name} created"); return item
+    clean_name = data.name.strip()
+    existing = (await db.execute(select(DatabaseDataSource).where(DatabaseDataSource.name == clean_name))).scalar_one_or_none()
+    if existing:
+        raise HTTPException(409, f"A data source named '{clean_name}' already exists.")
+    payload = data.model_dump()
+    payload["name"] = clean_name
+    item = DatabaseDataSource(**payload)
+    db.add(item)
+    try:
+        await db.flush()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(409, f"A data source named '{clean_name}' already exists.") from exc
+    await _audit(db, "CREATE", "DATA_SOURCE", item.id, f"Data source {item.name} created")
+    return item
 
 
 @router.delete("/data-sources/{item_id}", status_code=204)

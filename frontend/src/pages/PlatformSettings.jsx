@@ -26,30 +26,186 @@ export default function PlatformSettings() {
 }
 
 function Databases({ report }) {
-  const [items, setItems] = useState([]); const [form, setForm] = useState(databaseBlank); const [editing, setEditing] = useState(null); const [busy, setBusy] = useState(false); const [runtime,setRuntime]=useState(null);
-  const [sources,setSources]=useState([]); const [source,setSource]=useState({connection_id:'',name:'',query_text:'SELECT 1 AS status',parameters:{},enabled:true});
-  const load = () => Promise.all([api.get('/platform/databases'),api.get('/platform/data-sources'),api.get('/platform/database-runtime')]).then(([connections,dataSources,current])=>{setItems(connections.data);setSources(dataSources.data);setRuntime(current.data);}).catch(e => report('error', getApiErrorMessage(e)));
+  const [items, setItems] = useState([]);
+  const [form, setForm] = useState(databaseBlank);
+  const [editing, setEditing] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [testingId, setTestingId] = useState(null);
+  const [runtime, setRuntime] = useState(null);
+  const [sources, setSources] = useState([]);
+  const [source, setSource] = useState({ connection_id: '', name: '', query_text: 'SELECT 1 AS status', parameters: {}, enabled: true });
+  const [busySource, setBusySource] = useState(false);
+
+  const load = async () => {
+    try {
+      const [connections, dataSources, current] = await Promise.all([
+        api.get('/platform/databases'),
+        api.get('/platform/data-sources'),
+        api.get('/platform/database-runtime'),
+      ]);
+      setItems(connections.data);
+      setSources(dataSources.data);
+      setRuntime(current.data);
+    } catch (e) {
+      report('error', getApiErrorMessage(e));
+    }
+  };
+
   useEffect(() => { load(); }, []);
-  const edit = item => { setEditing(item.id); setForm({ ...item, password: '' }); };
+
+  const edit = item => {
+    setEditing(item.id);
+    setForm({ ...item, password: '' });
+  };
+
+  const cancelEdit = () => {
+    setEditing(null);
+    setForm(databaseBlank);
+  };
+
   const changeDatabaseType = databaseType => setForm(current => ({
     ...current,
     database_type: databaseType,
     port: databaseDefaultPorts[databaseType],
     host: databaseType === 'SQLITE' ? '' : current.host,
   }));
-  const save = async e => { e.preventDefault(); setBusy(true); try { editing ? await api.put(`/platform/databases/${editing}`, form) : await api.post('/platform/databases', form); report('success', 'Connection saved securely.'); setEditing(null); setForm(databaseBlank); load(); } catch(e) { report('error', getApiErrorMessage(e)); } finally { setBusy(false); } };
-  const test = async id => { try { const r = await api.post(`/platform/databases/${id}/test`); report(r.data.status === 'SUCCESS' ? 'success' : 'error', r.data.message); load(); } catch(e) { report('error', getApiErrorMessage(e)); } };
-  const remove = async id => { if (!confirm('Delete this connection?')) return; await api.delete(`/platform/databases/${id}`); load(); };
-  const activate=async item=>{if(!confirm(`Migrate all data to "${item.name}" and make it the primary database? The destination database must be empty.`))return;setBusy(true);try{const r=await api.post(`/platform/databases/${item.id}/activate`);report('success',`${r.data.migrated_records} records migrated and validated. Restart the backend to activate ${item.name}.`);}catch(err){report('error',getApiErrorMessage(err));}finally{setBusy(false);}};
-  const createSource=async e=>{e.preventDefault();try{await api.post('/platform/data-sources',{...source,connection_id:Number(source.connection_id)});setSource({connection_id:'',name:'',query_text:'SELECT 1 AS status',parameters:{},enabled:true});report('success','Data source created.');load();}catch(err){report('error',getApiErrorMessage(err));}};
-  const testSource=async id=>{try{const r=await api.post(`/platform/data-sources/${id}/test`);report(r.data.status==='SUCCESS'?'success':'error',r.data.status==='SUCCESS'?`Valid query: ${r.data.row_count} row(s).`:r.data.message);load();}catch(err){report('error',getApiErrorMessage(err));}};
-  return <><div className="settings-grid"><form className="glass-card settings-panel" onSubmit={save}><h3>{editing ? 'Edit Connection' : 'New Connection'}</h3>
-    <Field label="Name"><input className="form-input" required value={form.name} onChange={e => setForm({...form,name:e.target.value})}/></Field>
-    <div className="form-row"><Field label="Type"><select className="form-select" value={form.database_type} onChange={e => changeDatabaseType(e.target.value)}>{['POSTGRESQL','MYSQL','MSSQL','ORACLE','SQLITE'].map(x=><option key={x}>{x}</option>)}</select></Field><Field label="Database / file"><input className="form-input" required value={form.database_name} onChange={e => setForm({...form,database_name:e.target.value})}/></Field></div>
-    {form.database_type !== 'SQLITE' && <><div className="form-row"><Field label="Host"><input className="form-input" required value={form.host||''} onChange={e=>setForm({...form,host:e.target.value})}/></Field><Field label="Port"><input className="form-input" type="number" value={form.port||''} onChange={e=>setForm({...form,port:Number(e.target.value)})}/></Field></div><div className="form-row"><Field label="User"><input className="form-input" value={form.username||''} onChange={e=>setForm({...form,username:e.target.value})}/></Field><Field label={editing && form.password_configured ? 'New password (leave blank to keep current)' : 'Password'}><input className="form-input" type="password" value={form.password||''} onChange={e=>setForm({...form,password:e.target.value})}/></Field></div></>}
-    <label className="check-line"><input type="checkbox" checked={form.ssl_enabled} onChange={e=>setForm({...form,ssl_enabled:e.target.checked})}/> SSL enabled</label><button className="btn btn-primary" disabled={busy}><Save size={16}/>Save Connection</button>
-  </form><div className="glass-card settings-panel"><h3>Configured Connections</h3>{runtime&&<div className="current-database"><span>CURRENT PRIMARY DATABASE</span><strong>{runtime.name}</strong><small>{runtime.database_type}</small></div>}{!items.length?<p className="muted">No connections configured. Local SQLite remains the primary database.</p>:items.map(item=><div className="integration-row" key={item.id}><div><strong>{item.name}</strong><span>{item.database_type} · {item.host || item.database_name}</span></div><span className={`badge badge-${runtime?.connection_id===item.id?'online':item.last_status==='FAILED'?'offline':'unknown'}`}>{runtime?.connection_id===item.id?'PRIMARY':item.last_status}</span><div className="row-actions"><button className="btn btn-secondary" onClick={()=>test(item.id)}><TestTube size={14}/>Test</button>{runtime?.connection_id!==item.id&&<button className="btn btn-primary" disabled={busy} onClick={()=>activate(item)}>Use as Primary</button>}<button className="btn btn-secondary" onClick={()=>edit(item)}>Edit</button><button className="btn btn-danger" disabled={runtime?.connection_id===item.id} onClick={()=>remove(item.id)}><Trash2 size={14}/></button></div></div>)}</div></div>
-  <div className="settings-grid" style={{marginTop:'18px'}}><form className="glass-card settings-panel" onSubmit={createSource}><h3>New Data Source</h3><Field label="Connection"><select required className="form-select" value={source.connection_id} onChange={e=>setSource({...source,connection_id:e.target.value})}><option value="">Select</option>{items.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></Field><Field label="Name"><input required className="form-input" value={source.name} onChange={e=>setSource({...source,name:e.target.value})}/></Field><Field label="Read-only Query"><textarea required className="form-input" rows="4" value={source.query_text} onChange={e=>setSource({...source,query_text:e.target.value})}/></Field><button className="btn btn-primary"><Plus size={15}/>Create Source</button></form><div className="glass-card settings-panel"><h3>Available Sources</h3>{!sources.length?<p className="muted">No sources configured.</p>:sources.map(x=><div className="integration-row" key={x.id}><div><strong>{x.name}</strong><span>{items.find(i=>i.id===x.connection_id)?.name} · SELECT limited to 100 rows</span></div><span className={`badge badge-${x.last_status==='SUCCESS'?'online':x.last_status==='FAILED'?'offline':'unknown'}`}>{x.last_status}</span><div className="row-actions"><button className="btn btn-secondary" onClick={()=>testSource(x.id)}><TestTube size={14}/>Run</button><button className="btn btn-danger" onClick={async()=>{if(confirm('Delete source?')){await api.delete(`/platform/data-sources/${x.id}`);load();}}}><Trash2 size={14}/></button></div></div>)}</div></div></>;
+
+  const save = async e => {
+    e.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    try {
+      if (editing) {
+        await api.put(`/platform/databases/${editing}`, form);
+        report('success', 'Connection updated securely.');
+      } else {
+        await api.post('/platform/databases', form);
+        report('success', 'Connection saved securely.');
+      }
+      setEditing(null);
+      setForm(databaseBlank);
+      await load();
+    } catch (e) {
+      report('error', getApiErrorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const test = async id => {
+    if (testingId) return;
+    setTestingId(id);
+    try {
+      const r = await api.post(`/platform/databases/${id}/test`);
+      report(r.data.status === 'SUCCESS' ? 'success' : 'error', r.data.message);
+      await load();
+    } catch (e) {
+      report('error', getApiErrorMessage(e));
+    } finally {
+      setTestingId(null);
+    }
+  };
+
+  const remove = async id => {
+    if (!confirm('Delete this connection?')) return;
+    try {
+      await api.delete(`/platform/databases/${id}`);
+      report('success', 'Database connection deleted.');
+      await load();
+    } catch (e) {
+      report('error', getApiErrorMessage(e));
+    }
+  };
+
+  const activate = async item => {
+    if (!confirm(`Migrate all data to "${item.name}" and make it the primary database? The destination database must be empty.`)) return;
+    setBusy(true);
+    try {
+      const r = await api.post(`/platform/databases/${item.id}/activate`);
+      report('success', `${r.data.migrated_records} records migrated and validated. Restart the backend to activate ${item.name}.`);
+      await load();
+    } catch (err) {
+      report('error', getApiErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const createSource = async e => {
+    e.preventDefault();
+    if (busySource) return;
+    setBusySource(true);
+    try {
+      await api.post('/platform/data-sources', { ...source, connection_id: Number(source.connection_id) });
+      setSource({ connection_id: '', name: '', query_text: 'SELECT 1 AS status', parameters: {}, enabled: true });
+      report('success', 'Data source created.');
+      await load();
+    } catch (err) {
+      report('error', getApiErrorMessage(err));
+    } finally {
+      setBusySource(false);
+    }
+  };
+
+  const testSource = async id => {
+    try {
+      const r = await api.post(`/platform/data-sources/${id}/test`);
+      report(r.data.status === 'SUCCESS' ? 'success' : 'error', r.data.status === 'SUCCESS' ? `Valid query: ${r.data.row_count} row(s).` : r.data.message);
+      await load();
+    } catch (err) {
+      report('error', getApiErrorMessage(err));
+    }
+  };
+
+  return <>
+    <div className="settings-grid">
+      <form className="glass-card settings-panel" onSubmit={save}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+          <h3 style={{ margin: 0 }}>{editing ? 'Edit Connection' : 'New Connection'}</h3>
+          {editing && <button type="button" className="btn btn-secondary" onClick={cancelEdit}>Cancel</button>}
+        </div>
+        <Field label="Name"><input className="form-input" required value={form.name} onChange={e => setForm({...form,name:e.target.value})}/></Field>
+        <div className="form-row"><Field label="Type"><select className="form-select" value={form.database_type} onChange={e => changeDatabaseType(e.target.value)}>{['POSTGRESQL','MYSQL','MSSQL','ORACLE','SQLITE'].map(x=><option key={x}>{x}</option>)}</select></Field><Field label="Database / file"><input className="form-input" required value={form.database_name} onChange={e => setForm({...form,database_name:e.target.value})}/></Field></div>
+        {form.database_type !== 'SQLITE' && <><div className="form-row"><Field label="Host"><input className="form-input" required value={form.host||''} onChange={e=>setForm({...form,host:e.target.value})}/></Field><Field label="Port"><input className="form-input" type="number" value={form.port||''} onChange={e=>setForm({...form,port:Number(e.target.value)})}/></Field></div><div className="form-row"><Field label="User"><input className="form-input" value={form.username||''} onChange={e=>setForm({...form,username:e.target.value})}/></Field><Field label={editing && form.password_configured ? 'New password (leave blank to keep current)' : 'Password'}><input className="form-input" type="password" value={form.password||''} onChange={e=>setForm({...form,password:e.target.value})}/></Field></div></>}
+        <label className="check-line"><input type="checkbox" checked={form.ssl_enabled} onChange={e=>setForm({...form,ssl_enabled:e.target.checked})}/> SSL enabled</label>
+        <button className="btn btn-primary" type="submit" disabled={busy}><Save size={16}/>{busy ? 'Saving...' : 'Save Connection'}</button>
+      </form>
+      <div className="glass-card settings-panel">
+        <h3>Configured Connections</h3>
+        {runtime && <div className="current-database"><span>CURRENT PRIMARY DATABASE</span><strong>{runtime.name}</strong><small>{runtime.database_type}</small></div>}
+        {!items.length ? <p className="muted">No connections configured. Local SQLite remains the primary database.</p> : items.map(item => <div className="integration-row" key={item.id}>
+          <div><strong>{item.name}</strong><span>{item.database_type} · {item.host || item.database_name}</span></div>
+          <span className={`badge badge-${runtime?.connection_id===item.id?'online':item.last_status==='FAILED'?'offline':'unknown'}`}>{runtime?.connection_id===item.id?'PRIMARY':item.last_status}</span>
+          <div className="row-actions">
+            <button className="btn btn-secondary" disabled={testingId === item.id} onClick={()=>test(item.id)}><TestTube size={14}/>{testingId === item.id ? 'Testing...' : 'Test'}</button>
+            {runtime?.connection_id!==item.id && <button className="btn btn-primary" disabled={busy} onClick={()=>activate(item)}>Use as Primary</button>}
+            <button className="btn btn-secondary" onClick={()=>edit(item)}>Edit</button>
+            <button className="btn btn-danger" disabled={runtime?.connection_id===item.id} onClick={()=>remove(item.id)}><Trash2 size={14}/></button>
+          </div>
+        </div>)}
+      </div>
+    </div>
+    <div className="settings-grid" style={{marginTop:'18px'}}>
+      <form className="glass-card settings-panel" onSubmit={createSource}>
+        <h3>New Data Source</h3>
+        <Field label="Connection"><select required className="form-select" value={source.connection_id} onChange={e=>setSource({...source,connection_id:e.target.value})}><option value="">Select</option>{items.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></Field>
+        <Field label="Name"><input required className="form-input" value={source.name} onChange={e=>setSource({...source,name:e.target.value})}/></Field>
+        <Field label="Read-only Query"><textarea required className="form-input" rows="4" value={source.query_text} onChange={e=>setSource({...source,query_text:e.target.value})}/></Field>
+        <button className="btn btn-primary" type="submit" disabled={busySource}><Plus size={15}/>{busySource ? 'Creating...' : 'Create Source'}</button>
+      </form>
+      <div className="glass-card settings-panel">
+        <h3>Available Sources</h3>
+        {!sources.length ? <p className="muted">No sources configured.</p> : sources.map(x=><div className="integration-row" key={x.id}>
+          <div><strong>{x.name}</strong><span>{items.find(i=>i.id===x.connection_id)?.name} · SELECT limited to 100 rows</span></div>
+          <span className={`badge badge-${x.last_status==='SUCCESS'?'online':x.last_status==='FAILED'?'offline':'unknown'}`}>{x.last_status}</span>
+          <div className="row-actions">
+            <button className="btn btn-secondary" onClick={()=>testSource(x.id)}><TestTube size={14}/>Run</button>
+            <button className="btn btn-danger" onClick={async()=>{if(confirm('Delete source?')){await api.delete(`/platform/data-sources/${x.id}`);await load();}}}><Trash2 size={14}/></button>
+          </div>
+        </div>)}
+      </div>
+    </div>
+  </>;
 }
 
 
