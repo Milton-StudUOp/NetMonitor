@@ -25,6 +25,12 @@ Service operations are a dedicated module in the main navigation:
   discover, then select and configure monitoring.
 - **Service Topology** is a separate full-screen-capable device-to-service map.
 
+The three pages are grouped under one expandable **Services Monitoring** navigation
+entry. Discovery uses a searchable device combobox. Existing monitored services can
+be opened from the dashboard to edit thresholds, intervals, expected state, severity,
+notifications, or stop monitoring. The topology uses React Flow for pan, zoom,
+fullscreen navigation, controls, and minimap support.
+
 These workflows are deliberately kept out of the device metrics/analytics page.
 
 The assistant does not assume that only devices registered as `SERVER` can expose

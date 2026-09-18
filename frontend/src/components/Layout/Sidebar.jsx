@@ -1,5 +1,5 @@
-import React from 'react';
-import { NavLink } from 'react-router-dom';
+import React, { useState } from 'react';
+import { NavLink, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
   Server,
@@ -14,9 +14,13 @@ import {
   Settings,
   HeartPulse,
   ScanSearch,
+  ChevronDown,
 } from 'lucide-react';
 
 export default function Sidebar({ user }) {
+  const location=useLocation();
+  const servicesActive=location.pathname.startsWith('/service-');
+  const [servicesOpen,setServicesOpen]=useState(servicesActive);
   const navItems = [
     { to: '/', label: 'Dashboard', icon: LayoutDashboard },
     { to: '/topology', label: 'Topology', icon: GitBranch },
@@ -27,9 +31,6 @@ export default function Sidebar({ user }) {
     { to: '/history', label: 'History', icon: History },
     { to: '/reports', label: 'Reports', icon: FileText },
     ...(user?.role !== 'VIEWER' ? [{ to: '/discovery', label: 'Discovery', icon: Radar }] : []),
-    { to: '/service-monitoring', label: 'Service Monitoring', icon: Activity },
-    { to: '/service-topology', label: 'Service Topology', icon: GitBranch },
-    ...(user?.role !== 'VIEWER' ? [{ to: '/service-discovery', label: 'Discover Services', icon: ScanSearch }] : []),
     ...(user?.role === 'ADMINISTRATOR' ? [{ to: '/settings', label: 'Settings', icon: Settings }] : []),
     ...(user?.role === 'ADMINISTRATOR' ? [{ to: '/system-health', label: 'System Health', icon: HeartPulse }] : []),
   ];
@@ -99,6 +100,10 @@ export default function Sidebar({ user }) {
             </NavLink>
           );
         })}
+        <div className={`sidebar-nav-group ${servicesActive?'active':''}`}>
+          <button className="sidebar-nav-group-toggle" onClick={()=>setServicesOpen(value=>!value)} aria-expanded={servicesOpen}><Activity size={18}/><span>Services Monitoring</span><ChevronDown size={15} className={servicesOpen?'open':''}/></button>
+          {servicesOpen&&<div className="sidebar-nav-children"><NavLink to="/service-monitoring">Service Monitoring</NavLink>{user?.role!=='VIEWER'&&<NavLink to="/service-discovery"><ScanSearch size={14}/>Discover Windows Services</NavLink>}<NavLink to="/service-topology"><GitBranch size={14}/>Service Topology</NavLink></div>}
+        </div>
       </nav>
     </aside>
   );
