@@ -7,9 +7,6 @@ import api from '../api/client';
 import { getApiErrorMessage } from '../utils/errors';
 
 const colors={UP:'#22c55e',DOWN:'#ef4444',SUSPECTED:'#f59e0b',RECOVERING:'#f59e0b',UNKNOWN:'#64748b'};
-const POSITION_KEY='netmonitor.service-topology.positions';
-const VIEW_KEY='netmonitor.service-topology.views';
-const read=(key,fallback)=>{try{return JSON.parse(localStorage.getItem(key)||'null')||fallback;}catch{return fallback;}};
 
 function buildGraph(data,selected) {
   const devices=selected?data.devices.filter(x=>String(x.id)===selected):data.devices;
@@ -25,22 +22,24 @@ function buildGraph(data,selected) {
 export default function ServiceTopology() {
   const navigate=useNavigate(); const [params,setParams]=useSearchParams(); const container=useRef(null); const flow=useRef(null);
   const [data,setData]=useState({devices:[],services:[],edges:[]}); const [error,setError]=useState(''); const [loading,setLoading]=useState(true); const [layout,setLayout]=useState('auto'); const [fullscreen,setFullscreen]=useState(false);
-  const [nodes,setNodes,onNodesChange]=useNodesState([]); const [edges,setEdges,onEdgesChange]=useEdgesState([]); const [views,setViews]=useState(()=>read(VIEW_KEY,[])); const [viewId,setViewId]=useState('');
+  const [nodes,setNodes,onNodesChange]=useNodesState([]); const [edges,setEdges,onEdgesChange]=useEdgesState([]); const [views,setViews]=useState([]); const [viewId,setViewId]=useState(''); const [savedPositions,setSavedPositions]=useState({});
   const selected=params.get('device')||''; const generated=useMemo(()=>buildGraph(data,selected),[data,selected]);
   const load=()=>{setLoading(true);setError('');api.get('/services/topology').then(r=>setData(r.data)).catch(e=>setError(getApiErrorMessage(e))).finally(()=>setLoading(false));};
-  useEffect(()=>{load();const timer=setInterval(load,5000);return()=>clearInterval(timer);},[]);
-  useEffect(()=>{const saved=read(POSITION_KEY,{});setNodes(generated.nodes.map(n=>({...n,position:layout==='free'&&saved[n.id]?saved[n.id]:n.position})));setEdges(generated.edges);},[generated,layout,setNodes,setEdges]);
+  useEffect(()=>{load();api.get('/platform/service-topology-layout').then(({data:stored})=>{setLayout(stored.layout_mode||'auto');setSavedPositions(Object.fromEntries((stored.positions||[]).map(x=>[x.node_id,{x:x.x,y:x.y}])));if(Number.isFinite(stored.viewport?.zoom))setTimeout(()=>flow.current?.setViewport(stored.viewport),100);});api.get('/platform/service-topology-layout/snapshots').then(r=>setViews(r.data));const timer=setInterval(load,5000);return()=>clearInterval(timer);},[]);
+  useEffect(()=>{setNodes(generated.nodes.map(n=>({...n,position:layout==='free'&&savedPositions[n.id]?savedPositions[n.id]:n.position})));setEdges(generated.edges);},[generated,layout,savedPositions,setNodes,setEdges]);
   useEffect(()=>{const listener=()=>setFullscreen(document.fullscreenElement===container.current);document.addEventListener('fullscreenchange',listener);return()=>document.removeEventListener('fullscreenchange',listener);},[]);
-  const persist=current=>{const positions=Object.fromEntries(current.map(n=>[n.id,n.position]));localStorage.setItem(POSITION_KEY,JSON.stringify(positions));};
+  const payload=current=>({layout_mode:layout,positions:current.map(n=>({node_id:n.id,x:n.position.x,y:n.position.y})),viewport:flow.current?.getViewport?.()||{}});
+  const persist=(current,mode=layout)=>{const positions=Object.fromEntries(current.map(n=>[n.id,n.position]));setSavedPositions(positions);api.put('/platform/service-topology-layout',{...payload(current),layout_mode:mode}).catch(e=>setError(getApiErrorMessage(e)));};
   const dragStop=(_,node)=>{if(layout!=='free')return;setNodes(current=>{const next=current.map(x=>x.id===node.id?{...x,position:node.position}:x);persist(next);return next;});};
   const reorganize=()=>{setNodes(generated.nodes);persist(generated.nodes);setTimeout(()=>flow.current?.fitView({padding:.2,duration:350}),0);};
-  const changeLayout=value=>{setLayout(value);if(value==='auto')reorganize();else persist(nodes);};
+  const changeLayout=value=>{setLayout(value);if(value==='auto'){setNodes(generated.nodes);persist(generated.nodes,value);setTimeout(()=>flow.current?.fitView({padding:.2,duration:350}),0);}else persist(nodes,value);};
   const toggleFullscreen=async()=>document.fullscreenElement===container.current?document.exitFullscreen():container.current?.requestFullscreen?.();
-  const saveViews=next=>{setViews(next);localStorage.setItem(VIEW_KEY,JSON.stringify(next));};
-  const newView=()=>{const name=window.prompt('View/layout name:',`View ${new Date().toLocaleString('en-GB')}`)?.trim();if(!name)return;const item={id:String(Date.now()),name,positions:Object.fromEntries(nodes.map(n=>[n.id,n.position])),viewport:flow.current?.getViewport?.()};saveViews([...views,item]);setViewId(item.id);};
-  const saveView=()=>{if(!viewId)return newView();saveViews(views.map(v=>v.id===viewId?{...v,positions:Object.fromEntries(nodes.map(n=>[n.id,n.position])),viewport:flow.current?.getViewport?.()}:v));};
-  const restoreView=()=>{const view=views.find(v=>v.id===viewId);if(!view)return;setLayout('free');setNodes(current=>current.map(n=>({...n,position:view.positions[n.id]||n.position})));if(view.viewport)setTimeout(()=>flow.current?.setViewport(view.viewport,{duration:350}),0);};
-  const deleteView=()=>{if(!viewId||!window.confirm('Delete this saved view?'))return;saveViews(views.filter(v=>v.id!==viewId));setViewId('');};
+  const reloadViews=()=>api.get('/platform/service-topology-layout/snapshots').then(r=>setViews(r.data));
+  const snapshotPayload=name=>({name,...payload(nodes)});
+  const newView=async()=>{const name=window.prompt('View/layout name:',`View ${new Date().toLocaleString('en-GB')}`)?.trim();if(!name)return;try{const {data:item}=await api.post('/platform/service-topology-layout/snapshots',snapshotPayload(name));await reloadViews();setViewId(String(item.id));}catch(e){setError(getApiErrorMessage(e));}};
+  const saveView=async()=>{if(!viewId)return newView();const view=views.find(v=>String(v.id)===viewId);if(!view)return newView();try{await api.put(`/platform/service-topology-layout/snapshots/${viewId}`,snapshotPayload(view.name));await reloadViews();}catch(e){setError(getApiErrorMessage(e));}};
+  const restoreView=async()=>{if(!viewId)return;try{const {data:view}=await api.post(`/platform/service-topology-layout/snapshots/${viewId}/restore`);const positions=Object.fromEntries((view.positions||[]).map(x=>[x.node_id,{x:x.x,y:x.y}]));setLayout(view.layout_mode||'free');setSavedPositions(positions);setNodes(current=>current.map(n=>({...n,position:positions[n.id]||n.position})));if(Number.isFinite(view.viewport?.zoom))setTimeout(()=>flow.current?.setViewport(view.viewport,{duration:350}),0);}catch(e){setError(getApiErrorMessage(e));}};
+  const deleteView=async()=>{if(!viewId||!window.confirm('Delete this saved view?'))return;try{await api.delete(`/platform/service-topology-layout/snapshots/${viewId}`);setViewId('');await reloadViews();}catch(e){setError(getApiErrorMessage(e));}};
   const openNode=(_,node)=>node.data.kind==='service'?navigate(`/services/${node.data.record.id}?from=topology`):navigate(`/devices/${node.data.record.id}?from=service-topology`);
 
   return <div className="data-page"><div className="page-title"><div><h2>Service Topology</h2><p>Live topology with reusable views, automatic or free layout, zoom, pan, and fullscreen.</p></div><div className="row-actions"><select className="form-select compact" value={selected} onChange={e=>setParams(e.target.value?{device:e.target.value}:{})}><option value="">All monitored devices</option>{data.devices.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select><button className="btn btn-secondary" onClick={load}><RefreshCw size={15} className={loading?'spin':''}/>Refresh</button></div></div>{error&&<div className="notice error">{error}</div>}

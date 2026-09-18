@@ -216,6 +216,22 @@ class TopologySnapshotInput(TopologyLayoutInput):
     viewport: dict[str, float] = Field(default_factory=dict)
 
 
+class ServiceNodePositionInput(BaseModel):
+    node_id: str = Field(min_length=1, max_length=128)
+    x: float
+    y: float
+
+
+class ServiceTopologyLayoutInput(BaseModel):
+    layout_mode: str = "free"
+    positions: list[ServiceNodePositionInput]
+    viewport: dict[str, float] = Field(default_factory=dict)
+
+
+class ServiceTopologySnapshotInput(ServiceTopologyLayoutInput):
+    name: str = Field(min_length=1, max_length=128)
+
+
 class SystemSettingsInput(BaseModel):
     timezone: str = "UTC"
     retention_days: int = Field(default=90, ge=1, le=3650)

@@ -16,11 +16,13 @@ from app.models.device import Device
 from app.models.interface import Interface
 from app.models.link import Link
 from app.models.platform import (AuditLog, DatabaseConnection, DatabaseDataSource, IconAsset,
-    NotificationIntegration, NotificationRule, SystemSetting, TopologyPosition, TopologySnapshot)
+    NotificationIntegration, NotificationRule, ServiceTopologyLayout, ServiceTopologySnapshot,
+    SystemSetting, TopologyPosition, TopologySnapshot)
 from app.models.redundancy_group import RedundancyGroup
 from app.schemas.platform import (DatabaseConnectionInput, DatabaseConnectionRead, DatabaseDataSourceInput, DatabaseDataSourceRead,
     IconRead, NotificationIntegrationInput, NotificationIntegrationRead,
-    NotificationRuleInput, NotificationRuleRead, SystemSettingsInput, TopologyLayoutInput, TopologySnapshotInput)
+    NotificationRuleInput, NotificationRuleRead, ServiceTopologyLayoutInput, ServiceTopologySnapshotInput,
+    SystemSettingsInput, TopologyLayoutInput, TopologySnapshotInput)
 from app.security import decrypt_secret, encrypt_secret
 from app.services.database_switcher import migrate_and_activate
 from app.services.database_adapters import (build_database_url, execute_read_only,
@@ -553,6 +555,76 @@ async def delete_topology_snapshot(snapshot_id: int, request: Request, db: Async
     ))).scalar_one_or_none()
     if not item: raise HTTPException(404, "Topology view not found")
     await _audit(db, "DELETE", "TOPOLOGY_SNAPSHOT", item.id, f"Topology view {item.name} deleted"); await db.delete(item)
+
+
+@router.get("/service-topology-layout")
+async def get_service_topology_layout(request: Request, db: AsyncSession = Depends(get_db)):
+    owner_id = _request_user_id(request)
+    item = await db.get(ServiceTopologyLayout, owner_id)
+    return {"layout_mode": item.layout_mode if item else "auto", "positions": item.positions or [] if item else [],
+        "viewport": item.viewport or {} if item else {}}
+
+
+@router.put("/service-topology-layout")
+async def save_service_topology_layout(data: ServiceTopologyLayoutInput, request: Request,
+                                       db: AsyncSession = Depends(get_db)):
+    owner_id = _request_user_id(request); item = await db.get(ServiceTopologyLayout, owner_id)
+    if not item: item = ServiceTopologyLayout(user_id=owner_id); db.add(item)
+    item.layout_mode = data.layout_mode; item.positions = [x.model_dump() for x in data.positions]
+    item.viewport = data.viewport; await _audit(db, "UPDATE", "SERVICE_TOPOLOGY", owner_id,
+        f"Saved {len(data.positions)} service topology node positions")
+    return {"status": "saved", "count": len(data.positions)}
+
+
+@router.get("/service-topology-layout/snapshots")
+async def list_service_topology_snapshots(request: Request, db: AsyncSession = Depends(get_db)):
+    owner_id = _request_user_id(request)
+    rows = (await db.execute(select(ServiceTopologySnapshot).where(ServiceTopologySnapshot.user_id == owner_id)
+        .order_by(ServiceTopologySnapshot.updated_at.desc()))).scalars().all()
+    return [{"id": x.id, "name": x.name, "layout_mode": x.layout_mode, "positions": x.positions or [],
+        "viewport": x.viewport or {}, "created_at": x.created_at, "updated_at": x.updated_at} for x in rows]
+
+
+@router.post("/service-topology-layout/snapshots", status_code=201)
+async def create_service_topology_snapshot(data: ServiceTopologySnapshotInput, request: Request,
+                                           db: AsyncSession = Depends(get_db)):
+    owner_id = _request_user_id(request)
+    duplicate = (await db.execute(select(ServiceTopologySnapshot).where(ServiceTopologySnapshot.user_id == owner_id,
+        ServiceTopologySnapshot.name == data.name))).scalar_one_or_none()
+    if duplicate: raise HTTPException(409, "A service topology view already uses this name")
+    item = ServiceTopologySnapshot(user_id=owner_id, name=data.name, layout_mode=data.layout_mode,
+        positions=[x.model_dump() for x in data.positions], viewport=data.viewport); db.add(item); await db.flush()
+    return {"id": item.id, "name": item.name}
+
+
+@router.put("/service-topology-layout/snapshots/{snapshot_id}")
+async def update_service_topology_snapshot(snapshot_id: int, data: ServiceTopologySnapshotInput, request: Request,
+                                           db: AsyncSession = Depends(get_db)):
+    owner_id = _request_user_id(request)
+    item = (await db.execute(select(ServiceTopologySnapshot).where(ServiceTopologySnapshot.id == snapshot_id,
+        ServiceTopologySnapshot.user_id == owner_id))).scalar_one_or_none()
+    if not item: raise HTTPException(404, "Service topology view not found")
+    item.name = data.name; item.layout_mode = data.layout_mode; item.positions = [x.model_dump() for x in data.positions]
+    item.viewport = data.viewport; return {"id": item.id, "name": item.name}
+
+
+@router.post("/service-topology-layout/snapshots/{snapshot_id}/restore")
+async def restore_service_topology_snapshot(snapshot_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    owner_id = _request_user_id(request)
+    item = (await db.execute(select(ServiceTopologySnapshot).where(ServiceTopologySnapshot.id == snapshot_id,
+        ServiceTopologySnapshot.user_id == owner_id))).scalar_one_or_none()
+    if not item: raise HTTPException(404, "Service topology view not found")
+    return {"id": item.id, "name": item.name, "layout_mode": item.layout_mode,
+        "positions": item.positions or [], "viewport": item.viewport or {}}
+
+
+@router.delete("/service-topology-layout/snapshots/{snapshot_id}", status_code=204)
+async def delete_service_topology_snapshot(snapshot_id: int, request: Request, db: AsyncSession = Depends(get_db)):
+    owner_id = _request_user_id(request)
+    item = (await db.execute(select(ServiceTopologySnapshot).where(ServiceTopologySnapshot.id == snapshot_id,
+        ServiceTopologySnapshot.user_id == owner_id))).scalar_one_or_none()
+    if not item: raise HTTPException(404, "Service topology view not found")
+    await db.delete(item)
 
 
 @router.get("/settings")

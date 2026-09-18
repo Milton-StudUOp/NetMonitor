@@ -9,6 +9,7 @@ from app.models.monitoring_provider import (DeviceCapability, DeviceMonitoringCr
     MonitoringProfile, ServiceCheckHistory, SystemMetricSnapshot)  # noqa: F401
 from app.models.platform import (AuditLog, DatabaseConnection, DatabaseDataSource, DatabaseSchemaVersion, IconAsset, NotificationDelivery,
                                  NotificationIntegration, NotificationRule, SystemSetting, TopologyPosition, TopologySnapshot,
+                                 ServiceTopologyLayout, ServiceTopologySnapshot,
                                  UserAccount, AuthSession, PasswordResetToken)  # noqa: F401
 
 __all__ = [
@@ -22,5 +23,5 @@ __all__ = [
     "DeviceCapability", "DeviceMonitoringCredential",
     "DiscoveredService", "MonitoringProfile", "ServiceCheckHistory", "SystemMetricSnapshot",
     "AuditLog", "DatabaseConnection", "DatabaseDataSource", "DatabaseSchemaVersion", "IconAsset", "NotificationDelivery", "NotificationIntegration",
-    "NotificationRule", "SystemSetting", "TopologyPosition", "TopologySnapshot", "UserAccount", "AuthSession", "PasswordResetToken",
+    "NotificationRule", "SystemSetting", "TopologyPosition", "TopologySnapshot", "ServiceTopologyLayout", "ServiceTopologySnapshot", "UserAccount", "AuthSession", "PasswordResetToken",
 ]

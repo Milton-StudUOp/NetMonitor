@@ -120,6 +120,28 @@ class TopologySnapshot(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class ServiceTopologyLayout(Base):
+    __tablename__ = "service_topology_layouts"
+    user_id: Mapped[int] = mapped_column(ForeignKey("user_accounts.id", ondelete="CASCADE"), primary_key=True)
+    layout_mode: Mapped[str] = mapped_column(String(16), default="auto")
+    positions: Mapped[list] = mapped_column(PortableJSON, default=list)
+    viewport: Mapped[dict] = mapped_column(PortableJSON, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class ServiceTopologySnapshot(Base):
+    __tablename__ = "service_topology_snapshots"
+    __table_args__ = (UniqueConstraint("user_id", "name", name="uq_service_topology_snapshots_user_name"),)
+    id: Mapped[int] = mapped_column(Integer, Identity(), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("user_accounts.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(128), index=True)
+    layout_mode: Mapped[str] = mapped_column(String(16), default="free")
+    positions: Mapped[list] = mapped_column(PortableJSON, default=list)
+    viewport: Mapped[dict] = mapped_column(PortableJSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class SystemSetting(Base):
     __tablename__ = "system_settings"
     key: Mapped[str] = mapped_column(String(100), primary_key=True)
