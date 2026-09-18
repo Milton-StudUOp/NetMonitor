@@ -17,6 +17,11 @@ polling, system metrics, health, history, alerts, and reusable monitoring profil
 The device screen presents protocol-neutral readiness information. Transport and
 capability details are available under **Advanced diagnostics**.
 
+Service operations use the dedicated **Service Discovery** workspace in the main
+navigation. Connection setup, discovery, filtering, selection, monitoring policy,
+and the service topology live there; they are deliberately kept out of the device
+metrics/analytics page. The workspace provides separate inventory and topology views.
+
 ## Security
 
 Passwords are encrypted using the existing `SECRET_KEY`-derived credential mechanism.

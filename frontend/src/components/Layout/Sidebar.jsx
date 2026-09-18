@@ -13,6 +13,7 @@ import {
   Radar,
   Settings,
   HeartPulse,
+  ScanSearch,
 } from 'lucide-react';
 
 export default function Sidebar({ user }) {
@@ -26,6 +27,7 @@ export default function Sidebar({ user }) {
     { to: '/history', label: 'History', icon: History },
     { to: '/reports', label: 'Reports', icon: FileText },
     ...(user?.role !== 'VIEWER' ? [{ to: '/discovery', label: 'Discovery', icon: Radar }] : []),
+    ...(user?.role !== 'VIEWER' ? [{ to: '/service-discovery', label: 'Service Discovery', icon: ScanSearch }] : []),
     ...(user?.role === 'ADMINISTRATOR' ? [{ to: '/settings', label: 'Settings', icon: Settings }] : []),
     ...(user?.role === 'ADMINISTRATOR' ? [{ to: '/system-health', label: 'System Health', icon: HeartPulse }] : []),
   ];
