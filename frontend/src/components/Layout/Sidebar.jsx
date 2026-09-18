@@ -15,6 +15,7 @@ import {
   HeartPulse,
   ScanSearch,
   Gauge,
+  ListTree,
   ChevronDown,
 } from 'lucide-react';
 
@@ -23,7 +24,7 @@ export default function Sidebar({ user }) {
   const networkPaths=['/topology','/redundancy','/devices','/links','/discovery'];
   const networkActive=networkPaths.some(path=>location.pathname===path||location.pathname.startsWith(`${path}/`));
   const [networkOpen,setNetworkOpen]=useState(networkActive);
-  const servicesActive=location.pathname.startsWith('/service-');
+  const servicesActive=location.pathname.startsWith('/service-')||location.pathname.startsWith('/services');
   const [servicesOpen,setServicesOpen]=useState(servicesActive);
   const metricsActive=location.pathname.startsWith('/metrics-');
   const [metricsOpen,setMetricsOpen]=useState(metricsActive);
@@ -112,7 +113,7 @@ export default function Sidebar({ user }) {
         </div>
         <div className={`sidebar-nav-group ${servicesActive?'active':''}`}>
           <button className="sidebar-nav-group-toggle" onClick={()=>setServicesOpen(value=>!value)} aria-expanded={servicesOpen}><Activity size={18}/><span>Services Monitoring</span><ChevronDown size={15} className={servicesOpen?'open':''}/></button>
-          {servicesOpen&&<div className="sidebar-nav-children"><NavLink to="/service-monitoring"><Activity size={14}/>Service Monitoring</NavLink>{user?.role!=='VIEWER'&&<NavLink to="/service-discovery"><ScanSearch size={14}/>Discover Windows Services</NavLink>}<NavLink to="/service-topology"><GitBranch size={14}/>Service Topology</NavLink></div>}
+          {servicesOpen&&<div className="sidebar-nav-children"><NavLink to="/service-topology"><GitBranch size={14}/>Service Topology</NavLink><NavLink to="/service-monitoring"><Activity size={14}/>Service Monitoring</NavLink><NavLink to="/services"><ListTree size={14}/>Services</NavLink>{user?.role!=='VIEWER'&&<NavLink to="/service-discovery"><ScanSearch size={14}/>Discovery</NavLink>}</div>}
         </div>
         <div className={`sidebar-nav-group ${metricsActive?'active':''}`}>
           <button className="sidebar-nav-group-toggle" onClick={()=>setMetricsOpen(value=>!value)} aria-expanded={metricsOpen}><Gauge size={18}/><span>Metrics Monitoring</span><ChevronDown size={15} className={metricsOpen?'open':''}/></button>
