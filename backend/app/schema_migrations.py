@@ -1,6 +1,6 @@
 from sqlalchemy import inspect
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 async def ensure_runtime_schema(engine) -> None:

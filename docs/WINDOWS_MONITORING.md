@@ -1,9 +1,9 @@
 # Windows monitoring
 
 NetMonitor connects from Linux to Windows through WS-Management using the modular
-`MonitoringProvider` interface. Phase 1 provides encrypted connection settings,
-capability detection, safe error classification, and a connection test. Service
-inventory and continuous polling are added in later phases.
+`MonitoringProvider` interface. It provides encrypted connection settings,
+capability detection, safe error classification, service inventory, selected-service
+polling, system metrics, health, history, alerts, and reusable monitoring profiles.
 
 ## Windows preparation
 
@@ -26,3 +26,29 @@ are converted into stable error codes such as `WINRM_UNAVAILABLE`,
 text cannot expose credentials or infrastructure details.
 
 Keep `SECRET_KEY` stable and back it up. Certificate validation is enabled by default.
+
+## Discovery and polling
+
+Discovery retrieves all services in one remote operation but does not monitor them
+automatically. Operators explicitly select services or apply a profile. Selected
+services are fetched in one batch per device. The background worker:
+
+- skips Windows checks while the device is offline;
+- limits concurrent device sessions;
+- honors per-service intervals and thresholds;
+- backs off after communication errors;
+- records communication failures as `UNKNOWN`, never as `SERVICE_DOWN`;
+- transitions through `SUSPECTED`, `DOWN`, `RECOVERING`, and `UP`;
+- opens and resolves service-specific alerts.
+
+CPU, memory, uptime, and fixed-disk capacity are collected in a separate system metric
+snapshot. The operational-health endpoint combines reachability, selected services,
+and the latest system snapshot without redefining ping as complete health.
+
+## Validation boundary
+
+Automated tests cover modern/legacy selection, normalized discovery, batched checks,
+metrics parsing, state thresholds, recovery, malformed responses, and a 100-service
+batch. Release acceptance still requires integration tests against an actual Windows
+Server 2008 R2 host and a modern Windows Server host with the security configuration
+used in production.

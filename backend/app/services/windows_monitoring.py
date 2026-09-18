@@ -76,4 +76,36 @@ $ps=if($PSVersionTable){$PSVersionTable.PSVersion.ToString()}else{'1.0'}
             {"transport": "winrm_https" if self.transport.endpoint.startswith("https") else "winrm_http"})
 
     async def discover_services(self) -> list[dict]:
-        raise NotImplementedError("Service discovery is implemented in Phase 2")
+        raw = await self.transport.run_powershell(r"""
+$ErrorActionPreference='Stop'
+Get-WmiObject Win32_Service | Select-Object Name,DisplayName,State,StartMode,Description,StartName | ConvertTo-Json -Compress
+""")
+        try: values = json.loads(raw or "[]")
+        except ValueError as exc: raise WindowsMonitoringError("DISCOVERY_FAILED", "Windows returned an invalid service inventory") from exc
+        if isinstance(values, dict): values = [values]
+        return [{"name": str(x.get("Name") or ""), "display_name": str(x.get("DisplayName") or x.get("Name") or ""),
+            "state": str(x.get("State") or "unknown").lower(), "start_mode": str(x.get("StartMode") or "unknown").lower(),
+            "description": x.get("Description"), "service_account": x.get("StartName"), "monitoring_provider": "windows"}
+            for x in values if x.get("Name")]
+
+    async def check_services(self, names: list[str]) -> dict[str, str]:
+        if not names: return {}
+        encoded = json.dumps(names).replace("'", "''")
+        raw = await self.transport.run_powershell("$names=ConvertFrom-Json '" + encoded + "'; "
+            "Get-WmiObject Win32_Service | Where-Object {$names -contains $_.Name} | "
+            "Select-Object Name,State | ConvertTo-Json -Compress")
+        try: values = json.loads(raw or "[]")
+        except ValueError as exc: raise WindowsMonitoringError("DISCOVERY_FAILED", "Windows returned an invalid service status response") from exc
+        if isinstance(values, dict): values = [values]
+        return {str(x["Name"]): str(x.get("State") or "unknown").lower() for x in values}
+
+    async def collect_system_metrics(self) -> dict:
+        raw = await self.transport.run_powershell(r"""
+$ErrorActionPreference='Stop'
+$os=Get-WmiObject Win32_OperatingSystem
+$cpu=(Get-WmiObject Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average
+$disks=Get-WmiObject Win32_LogicalDisk -Filter "DriveType=3" | ForEach-Object {@{name=$_.DeviceID;size=[int64]$_.Size;free=[int64]$_.FreeSpace}}
+@{cpu_percent=[double]$cpu;memory_percent=[math]::Round((1-($os.FreePhysicalMemory/$os.TotalVisibleMemorySize))*100,2);uptime_seconds=[int64]((Get-Date)-$os.ConvertToDateTime($os.LastBootUpTime)).TotalSeconds;storage=@($disks)} | ConvertTo-Json -Compress -Depth 4
+""")
+        try: return json.loads(raw)
+        except ValueError as exc: raise WindowsMonitoringError("DISCOVERY_FAILED", "Windows returned an invalid metrics response") from exc

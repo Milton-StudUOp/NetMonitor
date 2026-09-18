@@ -9,9 +9,11 @@ from app.config import get_settings
 from app.database import Base, async_session_factory
 import app.database as database
 from app.schema_migrations import ensure_runtime_schema
-from app.api import auth, devices, links, interfaces, redundancy, alerts, topology, reports, websocket, history, platform, discovery, system_health
+from app.api import auth, devices, links, interfaces, redundancy, alerts, topology, reports, websocket, history, platform, discovery, system_health, windows_monitoring
 from app.services.auth_service import authenticate_token
 from app.services.monitoring_engine import monitoring_engine
+from app.services.windows_monitoring_engine import windows_monitoring_engine
+from app.services.monitoring_profiles import ensure_builtin_profiles
 from app.models import Device, DeviceType, DeviceStatus, Interface, InterfaceStatus, Link, LinkType, LinkPriority, LinkStatus, RedundancyGroup, RedundancyStatus
 
 logger = structlog.get_logger()
@@ -32,15 +34,18 @@ async def lifespan(app: FastAPI):
     async with database.engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     await ensure_runtime_schema(database.engine)
+    await ensure_builtin_profiles()
 
     # Start background monitoring engine
     await monitoring_engine.load_configuration()
     monitoring_engine.start()
+    windows_monitoring_engine.start()
 
     yield
 
     logger.info("application_shutdown")
     monitoring_engine.stop()
+    await windows_monitoring_engine.stop_and_wait()
 
 
 app = FastAPI(
@@ -126,6 +131,7 @@ app.include_router(websocket.router)
 app.include_router(platform.router)
 app.include_router(discovery.router)
 app.include_router(system_health.router)
+app.include_router(windows_monitoring.router)
 
 
 @app.get("/health")

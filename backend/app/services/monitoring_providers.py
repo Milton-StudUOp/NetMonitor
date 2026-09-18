@@ -17,3 +17,9 @@ class MonitoringProvider(ABC):
 
     @abstractmethod
     async def discover_services(self) -> list[dict]: ...
+
+    @abstractmethod
+    async def check_services(self, names: list[str]) -> dict[str, str]: ...
+
+    @abstractmethod
+    async def collect_system_metrics(self) -> dict: ...

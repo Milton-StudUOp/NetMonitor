@@ -146,12 +146,14 @@ async def activate_database(item_id: int, db: AsyncSession = Depends(get_db)):
     if _is_active_database(item): raise HTTPException(409, "This connection is already the active primary database")
     if database.migration_in_progress: raise HTTPException(409, "Another database migration is already in progress")
     from app.services.monitoring_engine import monitoring_engine
+    from app.services.windows_monitoring_engine import windows_monitoring_engine
     try:
         await _test_database(item)
         await _audit(db, "MIGRATION_STARTED", "DATABASE", item.id, f"Migration to {item.name} started")
         await db.commit()
         database.migration_in_progress = True
         await monitoring_engine.stop_and_wait()
+        await windows_monitoring_engine.stop_and_wait()
         result = await migrate_and_activate(database.engine, item)
         metadata = {
             "connection_id": result["connection_id"],
@@ -168,11 +170,13 @@ async def activate_database(item_id: int, db: AsyncSession = Depends(get_db)):
         database.migration_in_progress = False
         await monitoring_engine.load_configuration()
         monitoring_engine.start()
+        windows_monitoring_engine.start()
         result.update({"status": "ACTIVE", "restart_required": False})
         return result
     except Exception as exc:
         database.migration_in_progress = False
         monitoring_engine.start()
+        windows_monitoring_engine.start()
         safe_reason = "The target is unavailable, not empty, lacks a compatible driver, or migration validation failed."
         await _audit(db, "MIGRATION_FAILED", "DATABASE", item.id, f"Migration to {item.name} failed")
         await db.commit()

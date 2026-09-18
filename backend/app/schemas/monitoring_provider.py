@@ -41,3 +41,23 @@ class WindowsCapabilityRead(BaseModel):
     capabilities: dict = Field(default_factory=dict)
     diagnostics: dict = Field(default_factory=dict)
     discovered_at: datetime | None = None
+
+
+class ServiceMonitoringUpdate(BaseModel):
+    service_ids: list[int]
+    monitored: bool = True
+    expected_state: Literal["running", "stopped"] = "running"
+    check_interval: int = Field(default=60, ge=30, le=86400)
+    failure_threshold: int = Field(default=3, ge=1, le=20)
+    recovery_threshold: int = Field(default=2, ge=1, le=20)
+    severity: Literal["INFORMATION", "WARNING", "CRITICAL"] = "CRITICAL"
+    notifications_enabled: bool = True
+
+
+class MonitoringProfileInput(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    description: str | None = None
+    service_patterns: list[str] = Field(default_factory=list)
+    metric_config: dict = Field(default_factory=dict)
+    defaults: dict = Field(default_factory=dict)
+    enabled: bool = True
