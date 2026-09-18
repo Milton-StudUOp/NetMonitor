@@ -37,12 +37,17 @@ export default function Sidebar({ user }) {
   ];
 
   return (
-    <aside style={{
+    <aside className="app-sidebar" style={{
       width: '260px',
       background: '#0d1322',
       borderRight: '1px solid var(--border-color)',
       display: 'flex',
       flexDirection: 'column',
+      flexShrink: 0,
+      minHeight: 0,
+      overflowY: 'auto',
+      overflowX: 'hidden',
+      scrollbarGutter: 'stable',
       padding: '20px 16px',
     }}>
       <div style={{

@@ -3,12 +3,16 @@ import { Wifi, WifiOff, KeyRound, LogOut } from 'lucide-react';
 
 export default function Header({ isConnected, user, onLogout, onChangePassword, title = 'Dashboard' }) {
   return (
-    <header style={{
+    <header className="app-header" style={{
       height: '64px',
       borderBottom: '1px solid var(--border-color)',
       background: 'rgba(15, 23, 42, 0.6)',
       backdropFilter: 'blur(12px)',
       display: 'flex',
+      flexShrink: 0,
+      minWidth: 0,
+      overflowX: 'auto',
+      overflowY: 'hidden',
       alignItems: 'center',
       justifyContent: 'space-between',
       padding: '0 24px',
