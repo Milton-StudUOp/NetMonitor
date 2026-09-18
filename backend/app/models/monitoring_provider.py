@@ -57,7 +57,7 @@ class DiscoveredService(Base):
     monitored: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     expected_state: Mapped[str] = mapped_column(String(16), default="running")
     check_interval: Mapped[int] = mapped_column(Integer, default=60)
-    failure_threshold: Mapped[int] = mapped_column(Integer, default=3)
+    failure_threshold: Mapped[int] = mapped_column(Integer, default=1)
     recovery_threshold: Mapped[int] = mapped_column(Integer, default=2)
     severity: Mapped[str] = mapped_column(String(24), default="CRITICAL")
     notifications_enabled: Mapped[bool] = mapped_column(Boolean, default=True)

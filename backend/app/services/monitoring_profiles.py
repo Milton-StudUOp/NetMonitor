@@ -18,6 +18,6 @@ async def ensure_builtin_profiles():
             if name not in existing:
                 db.add(MonitoringProfile(name=name, description=description, service_patterns=patterns,
                     metric_config={"cpu": True, "memory": True, "storage": True},
-                    defaults={"expected_state": "running", "check_interval": 60, "failure_threshold": 3,
+                    defaults={"expected_state": "running", "check_interval": 60, "failure_threshold": 1,
                         "recovery_threshold": 2, "severity": "CRITICAL", "notifications_enabled": True}))
         await db.commit()

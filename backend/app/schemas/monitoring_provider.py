@@ -48,7 +48,7 @@ class ServiceMonitoringUpdate(BaseModel):
     monitored: bool = True
     expected_state: Literal["running", "stopped"] = "running"
     check_interval: int = Field(default=60, ge=30, le=86400)
-    failure_threshold: int = Field(default=3, ge=1, le=20)
+    failure_threshold: int = Field(default=1, ge=1, le=1)
     recovery_threshold: int = Field(default=2, ge=1, le=20)
     severity: Literal["INFORMATION", "WARNING", "CRITICAL"] = "CRITICAL"
     notifications_enabled: bool = True

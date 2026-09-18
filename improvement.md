@@ -255,7 +255,7 @@ Recovery Threshold   2
 
 State handling:
 
-**UP → SUSPECTED → DOWN → RECOVERING → UP**
+**UP → DOWN → RECOVERING → UP**
 
 Do not generate a DOWN event from a single temporary communication failure.
 

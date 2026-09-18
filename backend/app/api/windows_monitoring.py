@@ -319,8 +319,9 @@ async def apply_profile(device_id: int, profile_id: int, db: AsyncSession = Depe
     profile = await db.get(MonitoringProfile, profile_id)
     if not profile or not profile.enabled: raise HTTPException(404, "Monitoring profile not found")
     services = (await db.execute(select(DiscoveredService).where(DiscoveredService.device_id == device_id))).scalars().all()
-    defaults = {"expected_state": "running", "check_interval": 60, "failure_threshold": 3,
+    defaults = {"expected_state": "running", "check_interval": 60, "failure_threshold": 1,
         "recovery_threshold": 2, "severity": "CRITICAL", "notifications_enabled": True, **(profile.defaults or {})}
+    defaults["failure_threshold"] = 1
     matched = [x for x in services if any(fnmatch(x.name.lower(), p.lower()) for p in profile.service_patterns)]
     now = datetime.now(timezone.utc)
     for item in matched:
