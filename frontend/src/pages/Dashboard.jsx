@@ -1,10 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { Server, Network, GitFork, AlertTriangle, ShieldCheck } from 'lucide-react';
 import api from '../api/client';
 import StatusCard from '../components/StatusCard';
 import AlertBanner from '../components/AlertBanner';
 import RedundancyPanel from '../components/RedundancyPanel';
 import TopologyGraph from '../components/TopologyGraph';
+
+const ServiceTopology = lazy(() => import('./ServiceTopology'));
 
 export default function Dashboard() {
   const [summary, setSummary] = useState(null);
@@ -99,9 +101,13 @@ export default function Dashboard() {
       {/* Full-width topology */}
       <div>
           <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '12px' }}>
-            Link Topology Map
+            Network Topology
           </h3>
           <TopologyGraph graphData={topology} />
+      </div>
+      <div className="dashboard-topology-section">
+        <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '12px' }}>Service Topology</h3>
+        <Suspense fallback={<div className="glass-card analytics-state">Loading service topology…</div>}><ServiceTopology embedded /></Suspense>
       </div>
     </div>
   );

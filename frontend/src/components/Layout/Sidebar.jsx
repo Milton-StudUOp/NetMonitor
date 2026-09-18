@@ -80,7 +80,7 @@ export default function Sidebar({ user }) {
       </div>
 
       <nav style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-        {navItems.map((item) => {
+        {navItems.slice(0,1).map((item) => {
           const Icon = item.icon;
           return (
             <NavLink
@@ -118,6 +118,24 @@ export default function Sidebar({ user }) {
           <button className="sidebar-nav-group-toggle" onClick={()=>setMetricsOpen(value=>!value)} aria-expanded={metricsOpen}><Gauge size={18}/><span>Metrics Monitoring</span><ChevronDown size={15} className={metricsOpen?'open':''}/></button>
           {metricsOpen&&<div className="sidebar-nav-children"><NavLink to="/metrics-monitoring"><Gauge size={14}/>Metrics Monitoring</NavLink>{user?.role!=='VIEWER'&&<NavLink to="/metrics-discovery"><ScanSearch size={14}/>Discover Windows Metrics</NavLink>}</div>}
         </div>
+        {navItems.slice(1).map((item) => {
+          const Icon = item.icon;
+          return (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              style={({ isActive }) => ({
+                display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 14px', borderRadius: '8px',
+                fontSize: '0.9rem', fontWeight: 500, color: isActive ? 'var(--text-main)' : 'var(--text-muted)',
+                background: isActive ? 'rgba(59, 130, 246, 0.15)' : 'transparent',
+                border: isActive ? '1px solid rgba(59, 130, 246, 0.3)' : '1px solid transparent',
+                textDecoration: 'none', transition: 'all 0.2s ease',
+              })}
+            >
+              <Icon size={18}/><span>{item.label}</span>
+            </NavLink>
+          );
+        })}
       </nav>
     </aside>
   );
