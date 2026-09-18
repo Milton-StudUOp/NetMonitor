@@ -3,6 +3,7 @@ import asyncio
 from typing import List
 import structlog
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from starlette.websockets import WebSocketState
 from app.config import get_settings
 from app.database import async_session_factory
 from app.services.auth_service import authenticate_token
@@ -43,6 +44,20 @@ manager = ConnectionManager()
 router = APIRouter(tags=["WebSocket"])
 
 
+async def close_if_connected(websocket: WebSocket, code: int) -> None:
+    """Close an active socket without failing when the client already left."""
+    if (
+        websocket.client_state == WebSocketState.DISCONNECTED
+        or websocket.application_state == WebSocketState.DISCONNECTED
+    ):
+        return
+    try:
+        await websocket.close(code=code)
+    except (RuntimeError, WebSocketDisconnect):
+        # Disconnects can race with authentication timeout or rejection.
+        return
+
+
 @router.websocket("/ws/monitoring")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -50,12 +65,12 @@ async def websocket_endpoint(websocket: WebSocket):
         try:
             auth_message = await asyncio.wait_for(websocket.receive_json(), timeout=5)
         except (asyncio.TimeoutError, ValueError, WebSocketDisconnect):
-            await websocket.close(code=4401)
+            await close_if_connected(websocket, code=4401)
             return
         token = auth_message.get("token", "") if isinstance(auth_message, dict) and auth_message.get("type") == "authenticate" else ""
         async with async_session_factory() as db:
             if not token or not await authenticate_token(db, token):
-                await websocket.close(code=4401)
+                await close_if_connected(websocket, code=4401)
                 return
             await db.commit()
     await manager.connect(websocket, accept=False)
