@@ -1,5 +1,8 @@
 import pytest
+from fastapi import HTTPException
 
+from app.api.devices import _reject_loopback_windows_target
+from app.models.device import Device, DeviceType
 from app.services.windows_monitoring import WindowsMonitoringError, WindowsMonitoringProvider
 from app.services.windows_monitoring_engine import service_state_transition
 
@@ -87,3 +90,10 @@ async def test_service_check_batches_one_hundred_names_in_one_request():
     transport = CountingTransport(); provider = WindowsMonitoringProvider(transport)
     await provider.check_services([f"Service{i}" for i in range(100)])
     assert transport.calls == 1
+
+
+def test_loopback_is_rejected_as_remote_windows_target():
+    device = Device(name="local", ip_address="127.0.0.1", device_type=DeviceType.SERVER, location="lab")
+    with pytest.raises(HTTPException) as error:
+        _reject_loopback_windows_target(device)
+    assert "NetMonitor backend itself" in error.value.detail

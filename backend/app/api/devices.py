@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from ipaddress import ip_address
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
@@ -18,6 +19,18 @@ router = APIRouter(prefix="/api/devices", tags=["Devices"])
 AUTO_GATEWAY_LINK_DESCRIPTION = (
     "Enlace principal criado automaticamente a partir do equipamento gateway."
 )
+
+
+def _reject_loopback_windows_target(device: Device) -> None:
+    try:
+        loopback = ip_address(device.ip_address).is_loopback
+    except ValueError:
+        loopback = device.ip_address.lower() == "localhost"
+    if loopback:
+        raise HTTPException(status_code=400, detail=(
+            "127.0.0.1/localhost points to the NetMonitor backend itself. "
+            "Configure this device with the Windows host's reachable LAN address or DNS name."
+        ))
 
 
 def _auto_gateway_link_name(gateway: Device, device: Device) -> str:
@@ -184,6 +197,7 @@ async def test_windows_monitoring(device_id: int, db: AsyncSession = Depends(get
     device = await db.get(Device, device_id)
     if not device: raise HTTPException(status_code=404, detail="Device not found")
     if not device.ip_address: raise HTTPException(status_code=400, detail="Device has no IP address")
+    _reject_loopback_windows_target(device)
     if device.status != DeviceStatus.ONLINE:
         raise HTTPException(status_code=409, detail="Device must be online before Windows monitoring is tested")
     credential = (await db.execute(select(DeviceMonitoringCredential).where(
@@ -234,6 +248,7 @@ async def test_windows_monitoring_candidate(device_id: int, data: WindowsConnect
     device = await db.get(Device, device_id)
     if not device: raise HTTPException(status_code=404, detail="Device not found")
     if not device.ip_address: raise HTTPException(status_code=400, detail="Device has no IP address")
+    _reject_loopback_windows_target(device)
     if device.status != DeviceStatus.ONLINE:
         raise HTTPException(status_code=409, detail="Device must be online before remote monitoring is tested")
     password = data.password
