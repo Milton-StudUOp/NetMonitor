@@ -1,7 +1,31 @@
 import React from 'react';
 import { Wifi, WifiOff, KeyRound, LogOut, Monitor, Moon, Sun } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
 
-export default function Header({ isConnected, user, theme, onThemeChange, onLogout, onChangePassword, title = 'Dashboard' }) {
+const routeTitles = [
+  [/^\/$/, 'Dashboard'],
+  [/^\/topology(?:\/|$)/, 'Network Topology'],
+  [/^\/redundancy(?:\/|$)/, 'Redundancy'],
+  [/^\/devices\/[^/]+/, 'Device Details'],
+  [/^\/devices(?:\/|$)/, 'Devices'],
+  [/^\/links(?:\/|$)/, 'Links'],
+  [/^\/discovery(?:\/|$)/, 'Network Discovery'],
+  [/^\/service-topology(?:\/|$)/, 'Service Topology'],
+  [/^\/service-monitoring(?:\/|$)/, 'Service Monitoring'],
+  [/^\/service-discovery(?:\/|$)/, 'Service Discovery'],
+  [/^\/services\/[^/]+/, 'Service Details'],
+  [/^\/metrics-monitoring(?:\/|$)/, 'Metrics Monitoring'],
+  [/^\/metrics-discovery(?:\/|$)/, 'Metrics Discovery'],
+  [/^\/alerts(?:\/|$)/, 'Alerts'],
+  [/^\/history(?:\/|$)/, 'History'],
+  [/^\/reports(?:\/|$)/, 'Reports'],
+  [/^\/settings(?:\/|$)/, 'Configuration and Integrations'],
+  [/^\/system-health(?:\/|$)/, 'System Health'],
+];
+
+export default function Header({ isConnected, user, theme, onThemeChange, onLogout, onChangePassword, title }) {
+  const { pathname }=useLocation();
+  const pageTitle=title||routeTitles.find(([pattern])=>pattern.test(pathname))?.[1]||'NetMonitor';
   return (
     <header className="app-header" style={{
       height: '64px',
@@ -18,7 +42,7 @@ export default function Header({ isConnected, user, theme, onThemeChange, onLogo
       padding: '0 24px',
     }}>
       <h1 style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--text-main)' }}>
-        {title}
+        {pageTitle}
       </h1>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>

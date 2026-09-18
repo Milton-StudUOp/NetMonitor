@@ -74,7 +74,7 @@ export default function Sidebar({ user }) {
             NetMonitor
           </h2>
           <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-            Link & Redundancy
+            Infrastructure Monitoring
           </span>
         </div>
       </div>
