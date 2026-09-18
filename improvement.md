@@ -1,617 +1,238 @@
-# NetMonitor — Services & Metrics Discovery
+# Próxima implementação — Services e Metrics para Linux
 
-Implement a professional **Services & Metrics Discovery and Monitoring module** for devices already registered in NetMonitor.
+Planeamento da próxima fase de desenvolvimento do NetMonitor. O objetivo é adicionar monitorização Linux sem duplicar a implementação Windows nem acoplar o motor principal a SSH, WinRM ou a um sistema operativo específico.
 
-The solution must support **Windows Server 2008 R2 and newer Windows Server versions**, while keeping the NetMonitor backend running on **Linux**.
+## Resultado esperado
 
-The implementation must integrate with the existing architecture without breaking current device monitoring.
+Um dispositivo Linux registado no NetMonitor poderá ser testado, ter capacidades descobertas e disponibilizar:
 
-## Core Workflow
+- serviços `systemd` selecionados para monitorização;
+- CPU, memória e uptime;
+- utilização e espaço livre dos discos;
+- interfaces, estado e contadores de tráfego;
+- processos e informação básica do sistema quando suportados;
+- histórico, métricas, alertas e topologia com a mesma experiência já usada para Windows.
 
-For a registered device that is Online:
+O fluxo será:
 
-**Device → Discover Services & Metrics → Review → Select → Configure → Monitor → Alert → History**
+`Device → Test Connection → Discover Capabilities → Discover Services/Metrics → Select → Monitor → History/Alerts`
 
-The interface must be simple enough that the user does not need to understand WinRM, WMI, CIM or PowerShell.
+Descobrir não significa monitorizar. Apenas serviços e métricas explicitamente selecionados serão recolhidos continuamente.
 
----
+## 1. Arquitetura multiprovider
 
-# 1. Windows Monitoring Compatibility Layer
-
-Do NOT tightly couple NetMonitor directly to one Windows management technology.
-
-Create a backend abstraction such as:
-
-`WindowsMonitoringProvider`
-
-Conceptually:
-
-```text
-NetMonitor Linux
-       │
-       ▼
-WindowsMonitoringProvider
-       │
-       ├── Connection / Capability Detection
-       │
-       ├── Modern Windows Provider
-       │      └── PowerShell / CIM where supported
-       │
-       └── Legacy Windows Provider
-              └── PowerShell / WMI-compatible commands
-                       │
-                       ▼
-                 Windows Server
-```
-
-The rest of NetMonitor must receive normalized results regardless of which provider was used.
-
-Example normalized service:
-
-```json
-{
-  "name": "MSSQLSERVER",
-  "display_name": "SQL Server (MSSQLSERVER)",
-  "state": "running",
-  "start_mode": "automatic",
-  "monitoring_provider": "windows"
-}
-```
-
-Do not expose implementation differences to the frontend unless needed for diagnostics.
-
----
-
-# 2. Compatibility Requirements
-
-Target:
-
-**Windows Server 2008 R2 → newer supported Windows Server versions**
-
-During the first connection/discovery, detect available capabilities where possible, including:
-
-* Windows version
-* PowerShell version
-* WinRM availability
-* Available management mechanism
-* Authentication/connectivity status
-
-Select the safest compatible discovery method automatically.
-
-For modern systems, prefer appropriate PowerShell/CIM mechanisms.
-
-For older systems such as Windows Server 2008 R2, provide a compatible fallback using available PowerShell/WMI functionality.
-
-Do not assume modern PowerShell cmdlets exist on every target.
-
----
-
-# 3. Linux Backend
-
-NetMonitor remains Linux-based.
-
-Do not require Windows software to run on the NetMonitor server merely to perform Windows monitoring.
-
-Use an appropriate Python-compatible WinRM/WS-Management client or equivalent transport implementation.
-
-Keep the transport implementation isolated from the monitoring business logic.
-
-Conceptually:
-
-```text
-Linux NetMonitor
-       │
-       │ WinRM / WS-Management
-       ▼
-Windows Server
-       │
-       ├── PowerShell
-       ├── CIM/WMI
-       └── Windows Services
-```
-
----
-
-# 4. Secure Connectivity
-
-Support WinRM connectivity using appropriate authentication mechanisms.
-
-Prefer secure configurations suitable for production.
-
-Where supported/configured:
-
-**TCP 5986 — WinRM over HTTPS**
-
-Do not weaken Windows security globally simply to make discovery work.
-
-Avoid insecure configurations such as blindly enabling unencrypted transport or broadly configuring TrustedHosts.
-
-Credentials must:
-
-* Never be stored in plaintext
-* Never appear in frontend responses
-* Never appear in application logs
-* Never appear in exception messages
-* Use the existing NetMonitor secure credential mechanism
-
-Use least-privilege monitoring accounts wherever possible.
-
----
-
-# 5. Connection Test
-
-Before discovery, provide:
-
-**Test Connection**
-
-Return a user-friendly result such as:
-
-```text
-SERVER-OCC-01
-
-Connectivity       ✓
-WinRM               ✓
-Authentication      ✓
-Windows             Server 2019
-PowerShell          Available
-Service Discovery   Supported
-
-Ready for Discovery
-```
-
-For legacy systems:
-
-```text
-SERVER-LEGACY-01
-
-Connectivity       ✓
-WinRM               ✓
-Authentication      ✓
-Windows             Server 2008 R2
-Legacy Provider     ✓
-Service Discovery   Supported
-
-Ready for Discovery
-```
-
-Do not display unnecessary protocol complexity to normal users.
-
-Technical details may be available under **Advanced / Diagnostics**.
-
----
-
-# 6. Service Discovery
-
-Provide:
-
-**Discover Services & Metrics**
-
-For Windows Services retrieve, where available:
-
-* Name
-* Display Name
-* State
-* Start Mode
-* Description
-* Service account if appropriate
-* Additional useful metadata when inexpensive to retrieve
-
-For legacy Windows, use commands compatible with that environment.
-
-Batch service discovery.
-
-Do NOT create a separate WinRM connection/request for every Windows service.
-
----
-
-# 7. Discovery vs Monitoring
-
-Maintain a strict distinction:
-
-**Discovered Service**
-
-A service found on the Windows device.
-
-**Monitored Service**
-
-A discovered service explicitly selected for continuous monitoring.
-
-Never monitor every discovered Windows service automatically.
-
-A Windows server may contain hundreds of legitimate stopped/manual services.
-
-The UI should provide:
-
-* Search
-* Running/Stopped filter
-* Automatic/Manual/Disabled filter
-* Multi-selection
-* Bulk actions
-* Rediscovery
-* Monitor Selected
-* Stop Monitoring
-
----
-
-# 8. Monitoring Configuration
-
-For selected services support:
-
-**Expected State:** Running / Stopped
-**Check Interval:** configurable
-**Failure Threshold:** configurable
-**Recovery Threshold:** configurable
-**Severity:** Info / Warning / Critical
-**Notifications:** Enabled / Disabled
-
-Recommended defaults:
-
-```text
-Expected State       Running
-Check Interval       60 seconds
-Failure Threshold    3
-Recovery Threshold   2
-```
-
-State handling:
-
-**UP → DOWN → RECOVERING → UP**
-
-Do not generate a DOWN event from a single temporary communication failure.
-
----
-
-# 9. Intelligent Polling
-
-Use existing NetMonitor device status before performing Windows monitoring.
-
-```text
-Device DOWN
-    ↓
-Skip Windows service polling
-
-Device UP
-    ↓
-Windows monitoring check
-    ↓
-Retrieve selected services in batch
-```
-
-Avoid creating hundreds of concurrent remote sessions.
-
-Implement:
-
-* Controlled concurrency
-* Worker limits
-* Timeouts
-* Retry limits
-* Connection/session reuse where safe
-* Backoff after repeated communication failures
-* Batch retrieval
-
-The architecture must support the existing **100+ devices** and future growth.
-
----
-
-# 10. Metrics Discovery
-
-The compatibility layer must eventually support more than Windows Services.
-
-Design provider interfaces for:
-
-### System
-
-* CPU
-* Memory
-* Uptime
-
-### Storage
-
-* Disk usage
-* Free space
-* Disk information
-
-### Network
-
-* Interfaces
-* Interface status
-* Traffic counters where available
-
-### Windows
-
-* Services
-* Processes
-* Selected system information
-* Event-related monitoring where appropriate
-
-Capabilities may differ between Windows versions.
-
-The provider must return only supported capabilities.
-
----
-
-# 11. Capability Discovery
-
-Maintain a device capability inventory.
-
-Example:
-
-```json
-{
-  "device": "SERVER-OCC-01",
-  "platform": "windows",
-  "capabilities": {
-    "services": true,
-    "cpu": true,
-    "memory": true,
-    "storage": true,
-    "network_interfaces": true,
-    "processes": true
-  }
-}
-```
-
-This architecture should later allow additional providers:
+Extrair um contrato comum acima do provider Windows existente:
 
 ```text
 MonitoringProvider
-│
-├── WindowsProvider
-│
-├── LinuxProvider
-├── SNMPProvider
-├── HTTPProvider
-└── AgentProvider
+├── WindowsMonitoringProvider (WinRM, já existente)
+└── LinuxMonitoringProvider (SSH, próxima fase)
 ```
 
-Do not hard-code the overall monitoring engine specifically around Windows.
+O contrato deve oferecer operações normalizadas:
 
----
-
-# 12. Error Classification
-
-This is critical.
-
-Differentiate between:
-
-**DEVICE_DOWN**
-
-Host itself is unavailable.
-
-**WINRM_UNAVAILABLE**
-
-Device is online but remote management cannot be reached.
-
-**AUTHENTICATION_FAILED**
-
-Credentials were rejected.
-
-**PERMISSION_DENIED**
-
-Account authenticated but lacks required permissions.
-
-**DISCOVERY_FAILED**
-
-Connection works but discovery operation failed.
-
-**CHECK_TIMEOUT**
-
-Monitoring operation exceeded timeout.
-
-**SERVICE_DOWN**
-
-Connection succeeded and Windows explicitly reports the monitored service is not in its expected state.
-
-**UNKNOWN**
-
-Status cannot currently be determined.
-
-Never convert:
-
-`WinRM timeout`
-
-into:
-
-`MSSQLSERVER DOWN`
-
-That would create misleading operational alarms.
-
----
-
-# 13. User Experience
-
-Inside a device:
-
-```text
-SERVER-OCC-01                         ● ONLINE
-
-Overview | Monitoring | Services | Metrics | History
-
-Windows Monitoring
-Connection                             ✓ Connected
-
-Services
-────────────────────────────────────────────────
-Search...
-
-☑ OCC Communication    Running      Automatic
-☑ MSSQLSERVER          Running      Automatic
-☐ Windows Update       Stopped      Manual
-☐ Print Spooler        Stopped      Manual
-
-[ Rediscover ]                 [ Monitor Selected ]
+```python
+test_connection()
+discover_capabilities()
+discover_services()
+check_services(names)
+collect_system_metrics(capabilities)
 ```
 
-Normal users should interact with:
+O scheduler, histórico, alertas, perfis e frontend devem consumir respostas normalizadas e não comandos específicos de Windows ou Linux. Cada provider devolve somente capacidades realmente suportadas pelo host.
 
-**Discover → Select → Monitor**
+## 2. Transporte Linux
 
-Advanced users may access:
+Criar `SSHTransport`, isolado da lógica de monitorização, com:
 
-**Advanced → Connection / Provider / Diagnostics**
+- autenticação por chave SSH como opção recomendada;
+- password como opção compatível, sempre cifrada pelo mecanismo existente;
+- validação obrigatória da host key;
+- porta configurável, timeout e limites de saída;
+- execução sem shell interativo;
+- lista fechada de comandos construídos pelo backend;
+- redacção de credenciais, comandos sensíveis e detalhes internos nos logs.
 
-Keep protocol-specific terminology away from the normal workflow.
+Não aceitar comandos arbitrários enviados pelo frontend. Não recomendar `StrictHostKeyChecking=no`, root login ou permissões globais de `sudo`.
 
----
+## 3. Test Connection e capacidades
 
-# 14. Monitoring Profiles
+O teste deverá classificar separadamente:
 
-Prepare support for reusable templates:
+- `DEVICE_DOWN` — host não alcançável;
+- `SSH_UNAVAILABLE` — host online, mas SSH indisponível;
+- `HOST_KEY_MISMATCH` — identidade SSH diferente da guardada;
+- `AUTHENTICATION_FAILED` — credenciais rejeitadas;
+- `PERMISSION_DENIED` — login válido sem permissões de leitura;
+- `DISCOVERY_FAILED` — sessão funciona, descoberta falhou;
+- `CHECK_TIMEOUT` — operação excedeu o timeout;
+- `SERVICE_DOWN` — serviço consultado não corresponde ao estado esperado;
+- `UNKNOWN` — não foi possível confirmar o estado.
 
-**Windows Server — Standard**
+Detectar, quando disponível:
 
-**Database Server**
+- distribuição e versão por `/etc/os-release`;
+- kernel e arquitetura;
+- presença de `systemctl` e estado do systemd;
+- disponibilidade de `/proc`, `/sys`, `df`, `ip` e `ss`;
+- permissões efetivas do utilizador de monitorização.
 
-**OCC Server**
+## 4. Serviços Linux
 
-**Critical Infrastructure**
+Primeira implementação: unidades `systemd` do tipo `service`.
 
-Profiles should define:
+Modelo normalizado:
 
-* Services
-* Metrics
-* Thresholds
-* Check intervals
-* Failure thresholds
-* Recovery thresholds
-* Severity
-
-This allows one monitoring policy to be applied consistently across multiple servers.
-
----
-
-# 15. Device Health
-
-Do not treat Ping as complete device health.
-
-Model:
-
-```text
-SERVER-OCC-01
-ONLINE
-
-Availability       ✓
-Windows Services   ✓
-CPU                ✓
-Memory              ✓
-Storage             ⚠
-Network             ✓
+```json
+{
+  "name": "nginx.service",
+  "display_name": "A high performance web server",
+  "state": "running",
+  "start_mode": "enabled",
+  "monitoring_provider": "linux"
+}
 ```
 
-A device can therefore be:
+Mapeamentos:
 
-**Reachable but Operationally Degraded**
+- `active/running` → `running`;
+- `inactive`, `failed`, `deactivating` → estado normalizado apropriado;
+- `enabled`, `disabled`, `static`, `masked` → `start_mode` preservado;
+- falha confirmada → `DOWN` imediatamente;
+- recuperação → `RECOVERING` até cumprir o limiar configurado, depois `UP`.
 
-Example:
+Descoberta será executada em lote. Checks contínuos consultarão apenas os serviços selecionados, também em lote por dispositivo.
 
-```text
-Ping             UP
-Windows          Reachable
-OCC Service      DOWN
-SQL Server       UP
-CPU              Normal
-Memory           Normal
-```
+Hosts sem systemd devem declarar `services: unsupported` na primeira versão; suporte a OpenRC/SysV será uma fase posterior, sem heurísticas silenciosas.
 
-This distinction is one of the primary objectives of this feature.
+## 5. Métricas Linux
 
----
+Coletar com interfaces estáveis do sistema, evitando instalar agente na primeira versão:
 
-# 16. Performance
+| Capacidade | Fonte preferida |
+|---|---|
+| CPU | `/proc/stat` com duas amostras para calcular utilização |
+| Memória | `/proc/meminfo` |
+| Uptime | `/proc/uptime` |
+| Storage | `df -P -B1` e informação de mounts |
+| Interfaces | `/sys/class/net` e `ip -j` quando disponível |
+| Tráfego | RX/TX em `/sys/class/net/*/statistics` |
+| Processos | `/proc` ou `ps` com formato controlado |
+| Sistema | `/etc/os-release`, `uname` e hostname |
 
-Discovery and monitoring must be separate workloads.
+Valores serão convertidos para o mesmo schema normalizado usado pelas páginas atuais. Contadores cumulativos de rede devem ser guardados com timestamp; taxas serão calculadas entre amostras, tratando reboot e reset de contador.
 
-Recommended model:
+## 6. Persistência e credenciais
 
-```text
-PING
-10–30 seconds
+Reutilizar as tabelas existentes sempre que o modelo já for neutro:
 
-SELECTED SERVICES
-30–60+ seconds depending on criticality
+- `device_monitoring_credentials.provider = LINUX`;
+- `device_capabilities.provider = LINUX`;
+- `discovered_services.monitoring_provider = linux`;
+- `service_check_history` para checks de serviços;
+- `system_metric_snapshots` para métricas normalizadas.
 
-SYSTEM METRICS
-60+ seconds
+Antes de alterar tabelas, validar se nomes Windows-específicos precisam ser generalizados. Migrações devem preservar todos os dados Windows atuais e funcionar em SQLite, PostgreSQL, MySQL, SQL Server e Oracle.
 
-FULL DISCOVERY
-Manual / scheduled infrequently
-```
+Credenciais nunca entram em backup, respostas da API, erros ou logs. A private key deverá ser cifrada em repouso e nunca escrita em ficheiro temporário sem proteção.
 
-Do not repeatedly enumerate every Windows service every 30 seconds.
+## 7. Scheduler e desempenho
 
-After discovery, continuous checks should focus only on selected monitored services and metrics.
+- consultar Linux somente quando o device estiver `ONLINE`;
+- uma sessão limitada por dispositivo, reutilizada apenas quando seguro;
+- sem uma conexão por serviço ou métrica;
+- concorrência global configurável;
+- timeout, retry limitado e backoff para falhas de transporte;
+- descoberta manual/infrequente separada do polling;
+- services e metrics com intervalos independentes;
+- nenhum erro SSH deve ser convertido em `SERVICE_DOWN`.
 
----
+Meta inicial: 100+ dispositivos mistos Windows/Linux sem bloquear os ciclos ICMP, alertas ou WebSocket.
 
-# 17. Implementation Phases
+## 8. API e interface
 
-Implement incrementally.
+Generalizar os fluxos existentes sem criar menus paralelos por sistema operativo:
 
-### Phase 1 — Compatibility & Connectivity
+- **Services Monitoring → Discovery**: selecionar device, testar provider, descobrir e adicionar;
+- **Services Monitoring → Service Monitoring**: Windows e Linux na mesma lista, com filtro de provider/plataforma;
+- **Services Monitoring → Topology**: mesmos nós, layouts e auto-save por utilizador;
+- **Metrics Monitoring → Discovery**: mostrar somente métricas suportadas pelo host;
+- **Metrics Monitoring**: cartões e detalhes normalizados para ambas as plataformas.
 
-Implement `WindowsMonitoringProvider`, WinRM transport, capability detection, secure credential handling and **Test Connection**.
+O formulário de conexão muda dinamicamente conforme o provider:
 
-Validate against at least:
+- Windows: WinRM, autenticação e certificado;
+- Linux: SSH, porta, utilizador, chave/password e host key.
 
-* Windows Server 2008 R2
-* One modern Windows Server version available in the environment
+Protocolos e diagnósticos avançados ficam recolhidos numa área técnica. O fluxo normal continua `Test → Discover → Add → Edit`.
 
-### Phase 2 — Service Discovery
+## 9. Fases de implementação
 
-Implement service discovery, normalization, inventory and UI.
+### Fase 1 — Contrato comum e SSH
 
-### Phase 3 — Service Monitoring
+- introduzir `MonitoringProvider` sem regressão Windows;
+- implementar `SSHTransport` e armazenamento seguro;
+- implementar Test Connection, host-key trust explícito e códigos de erro;
+- testes unitários de parsing, timeout, autenticação e redacção.
 
-Implement selection, configuration, background polling, state transitions and history.
+### Fase 2 — Capabilities e serviços
 
-### Phase 4 — System Metrics
+- detectar Linux/systemd e capacidades;
+- descobrir unidades em lote;
+- adicionar seleção, configuração e polling;
+- integrar estados, histórico, alertas e recovery;
+- incluir provider/plataforma nos filtros.
 
-CPU, memory, uptime and storage.
+### Fase 3 — Métricas de sistema
 
-### Phase 5 — Health & Alerts
+- CPU, memória e uptime;
+- storage e mounts;
+- interfaces e contadores RX/TX;
+- processos e informação do sistema quando suportados;
+- integrar cartões, detalhes e topologia de rede.
 
-Thresholds, health visualization, alert integration and historical reporting.
+### Fase 4 — Robustez e escala
 
-### Phase 6 — Profiles & Extended Providers
+- backoff e limites de concorrência;
+- testes com 100+ devices simulados;
+- testes reais em Ubuntu LTS, Debian e uma distribuição RHEL-compatible;
+- documentação operacional e de least privilege;
+- revisão de segurança antes de produção.
 
-Monitoring templates and preparation for Linux/SNMP/Agent providers.
+## 10. Testes obrigatórios
 
----
+- chave válida, password válida e credenciais erradas;
+- host key nova, aceite e alterada;
+- SSH desativado/bloqueado;
+- device offline;
+- systemd disponível e indisponível;
+- serviço running, stopped, failed, restarting e removido;
+- CPU/memória/storage com locales diferentes;
+- interfaces físicas, virtuais e loopback;
+- timeout, saída inválida e perda temporária de rede;
+- rediscovery sem duplicados;
+- Windows e Linux monitorizados simultaneamente;
+- compatibilidade das migrações em todos os bancos suportados;
+- permissões Viewer/Operator/Administrator;
+- nenhum segredo presente em logs, API, export ou mensagens de erro.
 
-# 18. Mandatory Testing
+## Critérios de conclusão
 
-Before considering the feature complete, test:
+- Windows continua funcional sem regressões;
+- Linux usa a mesma experiência de Services, Metrics, History, Alerts e Topology;
+- somente capacidades suportadas aparecem;
+- somente seleções explícitas são monitorizadas;
+- falhas de transporte permanecem `UNKNOWN`, nunca falso `SERVICE_DOWN`;
+- layouts, preferências e filtros continuam por utilizador;
+- build frontend, suíte backend e testes reais Linux passam antes do merge.
 
-* Windows Server 2008 R2 compatibility
-* Modern Windows Server compatibility
-* Correct credentials
-* Wrong credentials
-* Insufficient permissions
-* WinRM disabled
-* Firewall blocking WinRM
-* Device offline
-* Service running
-* Service stopped
-* Service restarting
-* Timeout
-* Temporary network interruption
-* Rediscovery
-* 100+ device scalability behavior
+## Fora do escopo inicial
 
-Existing NetMonitor monitoring must continue operating normally during failures of the Windows monitoring subsystem.
+- instalação de agente próprio;
+- containers/Kubernetes;
+- logs/journald completos;
+- execução remota de ações corretivas;
+- OpenRC/SysV;
+- descoberta automática de credenciais.
 
----
-
-# Final Requirement
-
-The architecture must allow NetMonitor to evolve from:
-
-**“Is the device reachable?”**
-
-to:
-
-**“Is the device reachable, are its critical services operating, are its resources healthy, and what specifically requires attention?”**
-
-Implement this as a **modular monitoring framework**, not as a Windows-only feature bolted directly into the existing ping engine.
-
-Preserve existing functionality, prioritize backward compatibility, security, performance and a professional user experience.
+Esses itens poderão ser acrescentados depois que SSH, systemd e métricas essenciais estiverem estáveis.

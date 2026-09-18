@@ -1,8 +1,8 @@
-# NetMonitor Premium
+# NetMonitor
 
 Network infrastructure monitoring platform with automatic discovery, persistent topology, redundancy analysis, multi-channel alerts, and an administrator-selectable database.
 
-> The `main` branch represents the free edition. Advanced development is available on the `premium` branch.
+Active development is performed on the `dev` branch. Use `main` only for stable releases.
 
 ## Features
 
@@ -12,6 +12,10 @@ Network infrastructure monitoring platform with automatic discovery, persistent 
 - Selective import of discovered devices.
 - Associated gateway and automatic primary-link creation.
 - Automatic or free-form topology with positions persisted in the backend.
+- Separate network and service topologies with private saved views, viewport auto-save, zoom, pan, minimap, and fullscreen mode.
+- Windows service discovery through WinRM, explicit selection for monitoring, immediate DOWN classification, recovery confirmation, history, alerts, and analytics.
+- Capability-based Windows metrics for CPU, memory, uptime, storage, interfaces, processes, system information, and events where supported.
+- Light, dark, and operating-system theme modes persisted in the browser.
 - Built-in icon library and sanitized SVG/PNG uploads.
 - Redundancy through links or directly between devices.
 - Normal, degraded, and critical states with dependency diagnostics.
@@ -62,7 +66,7 @@ Open:
 ```bash
 git clone https://github.com/Milton-StudUOp/NetMonitor.git
 cd NetMonitor
-git switch premium
+git switch dev
 cp .env.example .env
 
 cd backend
@@ -125,7 +129,7 @@ npm run build
 
 Keep the existing `SECRET_KEY`. It encrypts the active multidatabase selection and integration credentials; replacing it does not delete records, but makes the encrypted connection information unreadable. On startup, NetMonitor now refuses to silently switch to an empty fallback database when the key is incompatible.
 
-Phase A adds authentication tables and metric aggregates through the startup schema process. Existing devices, links, alerts, topology, rules, and metrics remain in place. After the first Phase A startup, use **Initial administrator setup** once, then remove `BOOTSTRAP_TOKEN` and restart.
+Startup schema management adds required authentication, monitoring, topology-layout, service, and metric structures without replacing existing devices, links, alerts, rules, or history. After the first authenticated startup, use **Initial administrator setup** once, then remove `BOOTSTRAP_TOKEN` and restart.
 
 ## Docker
 
@@ -154,7 +158,7 @@ The previous database is not deleted. Failures never trigger a silent fallback: 
 
 Changing `SECRET_KEY` is different from a database outage: NetMonitor stops with an explicit decryption error and never opens an empty SQLite database in its place.
 
-## Phase A operations
+## Operations
 
 - Every non-public REST endpoint and WebSocket connection requires an expiring session. WebSocket credentials are sent in the first private protocol message, never in the connection URL.
 - Alerts and History use server-side pagination.
@@ -184,6 +188,20 @@ Scans expose live host/port counters, elapsed time, progress, and controlled can
 Select a device name or **Metrics** under **Devices** to open its operational detail. The view provides availability, average and maximum latency, packet loss, downtime, a performance chart, an availability timeline, and exact outage/recovery periods. Available filters are 24 hours, 7 days, 30 days, and 90 days.
 
 Analytics use portable SQLAlchemy filtering and aggregate records in the application layer, keeping the feature compatible with every supported database backend.
+
+## Services and system metrics
+
+The **Services Monitoring** navigation group contains:
+
+- **Topology** — device-to-service topology with the same saved-view and auto-save behavior as Network Topology.
+- **Service Monitoring** — only services explicitly added to monitoring, with operational filters and per-service configuration.
+- **Discovery** — select a registered device, test its remote-management connection, discover services, and add selected services with safe defaults.
+
+The **Metrics Monitoring** group separates metric discovery from continuous monitoring. Capability discovery returns only features supported by the target Windows host. Enabled CPU, memory, uptime, storage, interface, process, system-information, and event data is normalized before storage and display. Device reachability and service/resource health remain separate concepts.
+
+Windows service state changes use `UP → DOWN → RECOVERING → UP`. A confirmed service-state mismatch becomes `DOWN` immediately; recovery requires the configured successful checks. WinRM, authentication, permission, and timeout failures remain communication errors and never become false `SERVICE_DOWN` incidents.
+
+See [Windows monitoring](docs/WINDOWS_MONITORING.md). Linux services and metrics are the next planned provider; see [implementation roadmap](improvement.md).
 
 ## Operational filters and exports
 
@@ -243,7 +261,7 @@ Operational severity is classified consistently:
 - `WARNING`: degraded service, including an upstream dependency/partial-link condition and degraded redundancy. Performance-threshold warnings, such as excessive latency or packet loss, use this level when enabled.
 - `INFORMATION`: recovery and non-failure lifecycle information.
 
-The configured consecutive-failure threshold still applies before an outage is confirmed. This prevents a single transient probe failure from immediately creating a critical incident. Active incidents are deduplicated and recovery notifications are generated when the affected target returns to service.
+Network probes continue to use their configured consecutive-failure threshold. Windows services use immediate `DOWN` after a successful remote query reports a state different from the expected state. Transport failures remain `UNKNOWN`. Active incidents are deduplicated and recovery notifications are generated when the affected target returns to service.
 
 When no EMAIL integration exists in the active database, the Settings screen loads SMTP host, port, username, sender, recipients, and encryption mode from `.env`. The password is represented only as **Configured**. Saving the imported configuration stores that password encrypted in the active database. Account invitation and recovery email also use this environment configuration as a secure fallback.
 
@@ -269,10 +287,11 @@ npm run build
 - [Databases and migration](docs/DATABASES.md)
 - [Operations and upgrades](docs/OPERATIONS.md)
 - [WhatsApp Web integration](docs/WHATSAPP_WEB.md)
+- [Windows services and metrics](docs/WINDOWS_MONITORING.md)
 - [Security](SECURITY.md)
 - [Contributing](CONTRIBUTING.md)
-- [Premium specification status](improvement.md)
+- [Linux services and metrics roadmap](improvement.md)
 
 ## License
 
-The free edition published on the `main` branch is distributed under the [MIT License](LICENSE). Confirm the terms applicable to the premium branch before redistributing it.
+See the [MIT License](LICENSE) for redistribution terms.

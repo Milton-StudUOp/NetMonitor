@@ -71,7 +71,7 @@ The JSON configuration export excludes passwords, tokens, and SNMP communities a
 
 Startup creates missing tables and applies the portable compatibility migrations in `schema_migrations.py`. It does not intentionally clear existing tables.
 
-## Phase A data lifecycle
+## Data lifecycle
 
 Raw monitoring samples are retained according to the administrator setting. An independent hourly maintenance task:
 

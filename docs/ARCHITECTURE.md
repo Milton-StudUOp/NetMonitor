@@ -71,6 +71,12 @@ Notification integrations normally live in the active primary database. When EMA
 
 The optional WhatsApp Web integration is process-isolated. The active primary database stores only the provider mode and recipient list. FastAPI proxies authenticated administrative session commands and message delivery to a private Node.js bridge using a deployment secret. `LocalAuth` browser/session data is deliberately kept outside every application database in a restricted persistent volume; switching SQLite, PostgreSQL, MySQL, SQL Server, or Oracle therefore does not move or invalidate the linked-device session. QR payloads remain in bridge memory, are returned only through administrator-protected endpoints, carry `Cache-Control: no-store`, and are never logged or persisted in the application database.
 
+## Services and metrics providers
+
+Remote service and system monitoring is separate from network reachability. The Windows implementation uses an isolated WinRM transport and normalized provider results; the scheduler, history, alerts, capability inventory, metric snapshots, and frontend do not consume raw PowerShell or WMI output.
+
+The next provider will add Linux over SSH behind the same conceptual contract: connection test, capability discovery, service discovery, batched service checks, and system metric collection. Provider-specific credentials and transports remain isolated. Shared persistence uses provider and platform fields so Windows and Linux can coexist without parallel monitoring engines. See the detailed [Linux implementation roadmap](../improvement.md).
+
 The bridge exposes explicit `INITIALIZING`, `QR_REQUIRED`, `AUTHENTICATED`, `READY`, `FAILED`, and `DISCONNECTED` states. It detects common system browsers, falls back to Puppeteer's managed Chrome, reports permission/path failures, and stops silent initialization after 60 seconds. WhatsApp delivery uses a dedicated compact formatter; it does not reuse the longer plain-text email/Telegram representation.
 
 Notification destination fields use a common multi-value input contract: commas, semicolons, and line breaks are accepted in the frontend, then values are trimmed, deduplicated, and serialized as arrays at save time. The backend remains authoritative for provider-specific validation and sends one delivery per normalized destination.

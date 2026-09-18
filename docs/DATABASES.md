@@ -39,7 +39,7 @@ The `SECRET_KEY` used to activate the database must be preserved for the lifetim
 |---|---|---|
 | SQLite | `aiosqlite` | Included |
 | PostgreSQL | `asyncpg` | Included and recommended for production |
-| MySQL/MariaDB | `asyncmy` | Included in premium dependencies |
+| MySQL/MariaDB | `asyncmy` | Included in project dependencies |
 | SQL Server | `aioodbc` | Requires Microsoft ODBC Driver 18 on the host |
 | Oracle | `oracledb` | Thin mode when supported by the server |
 

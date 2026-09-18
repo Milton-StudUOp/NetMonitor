@@ -21,13 +21,13 @@ Service operations are a dedicated module in the main navigation:
 
 - **Service Monitoring** is the operational dashboard for health, coverage, failures,
   and recent checks.
-- **Discover Services** is a four-step assistant: choose device, test connection,
+- **Discovery** is a four-step assistant: choose device, test connection,
   discover, then select and configure monitoring.
-- **Service Topology** is a separate full-screen-capable device-to-service map.
+- **Topology** is a separate full-screen-capable device-to-service map.
 
 The three pages are grouped under one expandable **Services Monitoring** navigation
 entry. Discovery uses a searchable device combobox. Existing monitored services can
-be opened from the dashboard to edit thresholds, intervals, expected state, severity,
+be opened from the dashboard to edit intervals, expected state, recovery threshold, severity,
 notifications, or stop monitoring. The topology uses React Flow for pan, zoom,
 fullscreen navigation, controls, and minimap support.
 
@@ -56,10 +56,11 @@ services are fetched in one batch per device. The background worker:
 
 - skips Windows checks while the device is offline;
 - limits concurrent device sessions;
-- honors per-service intervals and thresholds;
+- honors per-service intervals and recovery thresholds;
 - backs off after communication errors;
 - records communication failures as `UNKNOWN`, never as `SERVICE_DOWN`;
-- transitions through `SUSPECTED`, `DOWN`, `RECOVERING`, and `UP`;
+- changes a confirmed service-state mismatch directly to `DOWN`, then transitions
+  through `RECOVERING` to `UP` after the configured successful checks;
 - opens and resolves service-specific alerts.
 
 CPU, memory, uptime, and fixed-disk capacity are collected in a separate system metric
@@ -69,7 +70,7 @@ and the latest system snapshot without redefining ping as complete health.
 ## Validation boundary
 
 Automated tests cover modern/legacy selection, normalized discovery, batched checks,
-metrics parsing, state thresholds, recovery, malformed responses, and a 100-service
+metrics parsing, immediate failure state, recovery, malformed responses, and a 100-service
 batch. Release acceptance still requires integration tests against an actual Windows
 Server 2008 R2 host and a modern Windows Server host with the security configuration
 used in production.
