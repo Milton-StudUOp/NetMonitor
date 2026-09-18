@@ -44,10 +44,14 @@ async def _provider(db: AsyncSession, device: Device) -> WindowsMonitoringProvid
 
 
 def _service(item: DiscoveredService) -> dict:
-    return {key: getattr(item, key) for key in ("id", "device_id", "name", "display_name", "description",
+    result = {key: getattr(item, key) for key in ("id", "device_id", "name", "display_name", "description",
         "service_account", "state", "start_mode", "monitoring_provider", "monitored", "expected_state",
         "check_interval", "failure_threshold", "recovery_threshold", "severity", "notifications_enabled",
         "monitor_state", "last_checked_at", "last_discovered_at")}
+    if result["monitor_state"] == "SUSPECTED":
+        result["monitor_state"] = "DOWN"
+    result["failure_threshold"] = 1
+    return result
 
 
 @router.get("/services/overview")
@@ -55,22 +59,23 @@ async def services_overview(db: AsyncSession = Depends(get_db)):
     services = (await db.execute(select(DiscoveredService).where(
         DiscoveredService.monitored.is_(True)).order_by(DiscoveredService.last_checked_at.desc()))).scalars().all()
     devices = {x.id: x for x in (await db.execute(select(Device))).scalars().all()}
-    counts = {state: sum(1 for x in services if x.monitor_state == state)
-              for state in ("UP", "DOWN", "SUSPECTED", "RECOVERING", "UNKNOWN")}
+    state_of = lambda item: "DOWN" if item.monitor_state == "SUSPECTED" else item.monitor_state
+    counts = {state: sum(1 for x in services if state_of(x) == state)
+              for state in ("UP", "DOWN", "RECOVERING", "UNKNOWN")}
     by_device = []
     for device_id in sorted({x.device_id for x in services}):
         items = [x for x in services if x.device_id == device_id]; device = devices.get(device_id)
         if not device: continue
-        health = "DOWN" if any(x.monitor_state == "DOWN" for x in items) else (
-            "DEGRADED" if any(x.monitor_state in {"SUSPECTED", "RECOVERING", "UNKNOWN"} for x in items) else "UP")
+        health = "DOWN" if any(state_of(x) == "DOWN" for x in items) else (
+            "DEGRADED" if any(state_of(x) in {"RECOVERING", "UNKNOWN"} for x in items) else "UP")
         by_device.append({"device_id": device.id, "device_name": device.name, "ip_address": device.ip_address,
             "device_status": device.status.value, "service_health": health, "total": len(items),
-            "down": sum(1 for x in items if x.monitor_state == "DOWN"),
-            "degraded": sum(1 for x in items if x.monitor_state in {"SUSPECTED", "RECOVERING", "UNKNOWN"})})
+            "down": sum(1 for x in items if state_of(x) == "DOWN"),
+            "degraded": sum(1 for x in items if state_of(x) in {"RECOVERING", "UNKNOWN"})})
     return {"summary": {"total": len(services), **{k.lower(): v for k, v in counts.items()},
         "devices": len(by_device)}, "devices": by_device,
         "attention": [{**_service(x), "device_name": devices[x.device_id].name} for x in services
-            if x.monitor_state in {"DOWN", "SUSPECTED", "RECOVERING", "UNKNOWN"}][:20],
+            if state_of(x) in {"DOWN", "RECOVERING", "UNKNOWN"}][:20],
         "recent": [{**_service(x), "device_name": devices[x.device_id].name} for x in services[:20]]}
 
 
@@ -179,6 +184,7 @@ async def service_analytics(service_id: int, period: str = Query("24h"), db: Asy
     series = []
     for bucket, samples in sorted(buckets.items()):
         status = max((x.monitor_state for x in samples), key=lambda x: rank.get(x, 0))
+        if status == "SUSPECTED": status = "DOWN"
         times = [x.response_ms for x in samples if x.response_ms is not None]
         healthy = sum(x.observed_state == service.expected_state and not x.error_code for x in samples)
         series.append({"timestamp": (start + timedelta(seconds=bucket * bucket_seconds)).isoformat(),
@@ -186,7 +192,7 @@ async def service_analytics(service_id: int, period: str = Query("24h"), db: Asy
             "response_ms": round(sum(times) / len(times), 2) if times else None, "samples": len(samples)})
     outages = []; outage_start = None; previous = None; failures = recoveries = 0
     for record in records:
-        timestamp = _utc(record.checked_at); state = record.monitor_state
+        timestamp = _utc(record.checked_at); state = "DOWN" if record.monitor_state == "SUSPECTED" else record.monitor_state
         if state == "DOWN" and previous != "DOWN":
             failures += 1
             if outage_start is None: outage_start = timestamp
@@ -293,8 +299,8 @@ async def operational_health(device_id: int, db: AsyncSession = Depends(get_db))
         DiscoveredService.device_id == device_id, DiscoveredService.monitored.is_(True)))).scalars().all()
     latest = (await db.execute(select(SystemMetricSnapshot).where(SystemMetricSnapshot.device_id == device_id)
         .order_by(SystemMetricSnapshot.collected_at.desc()).limit(1))).scalar_one_or_none()
-    service_state = "DOWN" if any(x.monitor_state == "DOWN" for x in services) else (
-        "DEGRADED" if any(x.monitor_state in {"SUSPECTED", "RECOVERING", "UNKNOWN"} for x in services) else "UP")
+    service_state = "DOWN" if any(x.monitor_state in {"DOWN", "SUSPECTED"} for x in services) else (
+        "DEGRADED" if any(x.monitor_state in {"RECOVERING", "UNKNOWN"} for x in services) else "UP")
     return {"device_id": device_id, "availability": device.status.value, "windows_services": service_state,
         "monitored_services": len(services), "cpu": latest.cpu_percent if latest else None,
         "memory": latest.memory_percent if latest else None,
