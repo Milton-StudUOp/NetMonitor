@@ -39,7 +39,7 @@ export default function Sidebar({ user }) {
   return (
     <aside className="app-sidebar" style={{
       width: '260px',
-      background: '#0d1322',
+      background: 'var(--sidebar-bg)',
       borderRight: '1px solid var(--border-color)',
       display: 'flex',
       flexDirection: 'column',
@@ -70,7 +70,7 @@ export default function Sidebar({ user }) {
           <Activity size={22} color="#fff" />
         </div>
         <div>
-          <h2 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#fff', letterSpacing: '-0.02em' }}>
+          <h2 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-main)', letterSpacing: '-0.02em' }}>
             NetMonitor
           </h2>
           <span style={{ fontSize: '0.7rem', color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
@@ -94,7 +94,7 @@ export default function Sidebar({ user }) {
                 borderRadius: '8px',
                 fontSize: '0.9rem',
                 fontWeight: 500,
-                color: isActive ? '#fff' : 'var(--text-muted)',
+                color: isActive ? 'var(--text-main)' : 'var(--text-muted)',
                 background: isActive ? 'rgba(59, 130, 246, 0.15)' : 'transparent',
                 border: isActive ? '1px solid rgba(59, 130, 246, 0.3)' : '1px solid transparent',
                 textDecoration: 'none',

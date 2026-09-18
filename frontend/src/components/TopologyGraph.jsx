@@ -208,10 +208,10 @@ const CustomDeviceNode = ({ data = {} }) => {
     <div style={{
       padding: '12px 18px',
       borderRadius: '10px',
-      background: '#0f172a',
+      background: 'var(--bg-surface)',
       border: `2px solid ${border}`,
       boxShadow: `0 0 15px ${border}40`,
-      color: '#fff',
+      color: 'var(--text-main)',
       width: `${NODE_WIDTH}px`,
       boxSizing: 'border-box',
       textAlign: 'center',
@@ -443,8 +443,8 @@ export default function TopologyGraph({ graphData }) {
   }
 
   return (
-    <div ref={containerRef} className="glass-card topology-canvas" style={{ width: '100%', height: isFullscreen ? '100vh' : 'clamp(620px, calc(100vh - 210px), 860px)', borderRadius: isFullscreen ? 0 : '12px', overflow: 'hidden', position: 'relative', background: '#111827' }}>
-      <div style={{ position: 'absolute', top: '12px', right: '12px', left: '12px', zIndex: 10, display: 'flex', justifyContent:'flex-end', flexWrap:'wrap', gap: '6px', padding: '5px', borderRadius: '9px', background: 'rgba(15, 23, 42, 0.94)', border: '1px solid var(--border-color)', boxShadow: '0 6px 18px rgba(0,0,0,.28)' }}>
+    <div ref={containerRef} className="glass-card topology-canvas" style={{ width: '100%', height: isFullscreen ? '100vh' : 'clamp(620px, calc(100vh - 210px), 860px)', borderRadius: isFullscreen ? 0 : '12px', overflow: 'hidden', position: 'relative', background: 'var(--canvas-bg)' }}>
+      <div style={{ position: 'absolute', top: '12px', right: '12px', left: '12px', zIndex: 10, display: 'flex', justifyContent:'flex-end', flexWrap:'wrap', gap: '6px', padding: '5px', borderRadius: '9px', background: 'var(--header-bg)', border: '1px solid var(--border-color)', boxShadow: '0 6px 18px rgba(0,0,0,.18)' }}>
         <select className="form-select" value={selectedSnapshotId} onChange={event => setSelectedSnapshotId(event.target.value)} style={{ width:'190px', padding:'5px 8px', fontSize:'0.72rem' }} title="My saved views">
           <option value="">My saved views…</option>
           {snapshots.map(snapshot => <option key={snapshot.id} value={snapshot.id}>{snapshot.name}</option>)}

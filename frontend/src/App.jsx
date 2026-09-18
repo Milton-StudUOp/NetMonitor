@@ -15,6 +15,7 @@ import PlatformSettings from './pages/PlatformSettings';
 import Login from './pages/Login';
 import PasswordChange from './components/PasswordChange';
 import api, { getAuthToken, setAuthToken } from './api/client';
+import './styles/theme.css';
 
 const DeviceAnalytics = lazy(() => import('./pages/DeviceAnalytics'));
 const Alerts = lazy(() => import('./pages/Alerts'));
@@ -30,10 +31,14 @@ const ServiceAnalytics = lazy(() => import('./pages/ServiceAnalytics'));
 const loadingPage = <div className="analytics-state">Loading page…</div>;
 
 export default function App() {
+  const [theme,setTheme]=useState(()=>localStorage.getItem('netmonitor.theme')||'system');
+  const [systemDark,setSystemDark]=useState(()=>window.matchMedia?.('(prefers-color-scheme: dark)').matches??true);
   const [user,setUser]=useState(null); const [checkingAuth,setCheckingAuth]=useState(true); const [authError,setAuthError]=useState(''); const [changingPassword,setChangingPassword]=useState(false); const [feedback,setFeedback]=useState('');
   const completeLogin=authenticatedUser=>{window.history.replaceState(null,'','/');setUser(authenticatedUser)};
   const checkSession=()=>{const token=getAuthToken();setAuthError('');if(!token){setCheckingAuth(false);return}setCheckingAuth(true);api.get('/auth/me').then(response=>setUser(response.data)).catch(error=>{if(!error.response)setAuthError('The backend is unavailable. Confirm that NetMonitor is running on port 5555.')}).finally(()=>setCheckingAuth(false))};
   useEffect(()=>{checkSession();const expired=()=>setUser(null);window.addEventListener('netmonitor:session-expired',expired);return()=>window.removeEventListener('netmonitor:session-expired',expired)},[]);
+  useEffect(()=>{const media=window.matchMedia('(prefers-color-scheme: dark)');const changed=event=>setSystemDark(event.matches);media.addEventListener?.('change',changed);return()=>media.removeEventListener?.('change',changed)},[]);
+  useEffect(()=>{const effective=theme==='system'?(systemDark?'dark':'light'):theme;document.documentElement.dataset.theme=effective;document.documentElement.style.colorScheme=effective;localStorage.setItem('netmonitor.theme',theme)},[theme,systemDark]);
   const { isConnected } = useWebSocket(() => {}, Boolean(user));
   const logout=async()=>{try{await api.post('/auth/logout')}catch{}setAuthToken(null);window.history.replaceState(null,'','/');setUser(null)};
 
@@ -47,7 +52,7 @@ export default function App() {
       <div className="app-layout">
         <Sidebar user={user} />
         <div className="main-content">
-          <Header isConnected={isConnected} user={user} onLogout={logout} onChangePassword={()=>setChangingPassword(true)} />
+          <Header isConnected={isConnected} user={user} theme={theme} onThemeChange={setTheme} onLogout={logout} onChangePassword={()=>setChangingPassword(true)} />
           <div className="page-body">
             {feedback&&<div className="notice success" role="status">{feedback}</div>}
             <ErrorBoundary>

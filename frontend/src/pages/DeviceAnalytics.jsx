@@ -12,7 +12,7 @@ const formatDuration = seconds => {
   const days = Math.floor(seconds / 86400); const hours = Math.floor((seconds % 86400) / 3600); const minutes = Math.floor((seconds % 3600) / 60);
   return [days && `${days}d`, hours && `${hours}h`, `${minutes}m`].filter(Boolean).join(' ');
 };
-const tooltipStyle = { background: '#0f172a', border: '1px solid rgba(255,255,255,.12)', borderRadius: 10, color: '#fff' };
+const tooltipStyle = { background: 'var(--bg-surface)', border: '1px solid var(--border-color)', borderRadius: 10, color: 'var(--text-main)' };
 
 export default function DeviceAnalytics() {
   const { deviceId } = useParams(); const navigate = useNavigate(); const location = useLocation();

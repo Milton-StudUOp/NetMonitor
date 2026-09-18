@@ -1,12 +1,12 @@
 import React from 'react';
-import { Wifi, WifiOff, KeyRound, LogOut } from 'lucide-react';
+import { Wifi, WifiOff, KeyRound, LogOut, Monitor, Moon, Sun } from 'lucide-react';
 
-export default function Header({ isConnected, user, onLogout, onChangePassword, title = 'Dashboard' }) {
+export default function Header({ isConnected, user, theme, onThemeChange, onLogout, onChangePassword, title = 'Dashboard' }) {
   return (
     <header className="app-header" style={{
       height: '64px',
       borderBottom: '1px solid var(--border-color)',
-      background: 'rgba(15, 23, 42, 0.6)',
+      background: 'var(--header-bg)',
       backdropFilter: 'blur(12px)',
       display: 'flex',
       flexShrink: 0,
@@ -17,11 +17,12 @@ export default function Header({ isConnected, user, onLogout, onChangePassword, 
       justifyContent: 'space-between',
       padding: '0 24px',
     }}>
-      <h1 style={{ fontSize: '1.25rem', fontWeight: 600, color: '#fff' }}>
+      <h1 style={{ fontSize: '1.25rem', fontWeight: 600, color: 'var(--text-main)' }}>
         {title}
       </h1>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+        <label className="theme-selector" title="Application theme"><span className="sr-only">Theme</span>{theme==='light'?<Sun size={15}/>:theme==='dark'?<Moon size={15}/>:<Monitor size={15}/>}<select value={theme} onChange={event=>onThemeChange(event.target.value)} aria-label="Application theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
         <div style={{
           display: 'flex',
           alignItems: 'center',

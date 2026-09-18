@@ -9,7 +9,7 @@ const periods=[['24h','24 hours'],['7d','7 days'],['30d','30 days'],['90d','90 d
 const formatDate=value=>value?new Intl.DateTimeFormat(undefined,{dateStyle:'medium',timeStyle:'medium'}).format(new Date(value)):'Ongoing';
 const formatAxis=value=>new Intl.DateTimeFormat(undefined,{month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'}).format(new Date(value));
 const formatDuration=seconds=>{const days=Math.floor(seconds/86400),hours=Math.floor(seconds%86400/3600),minutes=Math.floor(seconds%3600/60);return[days&&`${days}d`,hours&&`${hours}h`,`${minutes}m`].filter(Boolean).join(' ')};
-const tooltipStyle={background:'#0f172a',border:'1px solid rgba(255,255,255,.12)',borderRadius:10,color:'#fff'};
+const tooltipStyle={background:'var(--bg-surface)',border:'1px solid var(--border-color)',borderRadius:10,color:'var(--text-main)'};
 
 export default function ServiceAnalytics(){
   const {serviceId}=useParams();const navigate=useNavigate();const location=useLocation();const [period,setPeriod]=useState('24h');const [data,setData]=useState(null);const [loading,setLoading]=useState(true);const [error,setError]=useState('');
