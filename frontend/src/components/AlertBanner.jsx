@@ -12,6 +12,7 @@ export default function AlertBanner({ alert, onResolve }) {
   const severity = severityConfig[alert.severity] ? alert.severity : 'INFORMATION';
   const { Icon, label } = severityConfig[severity];
   const resolved = Boolean(alert.is_resolved || alert.resolved_at);
+  const displayTitle = (alert.title || 'Untitled alert').replace(/\s+on device #\d+\b/i, '');
 
   return (
     <article className={`incident-card severity-${severity.toLowerCase()}${resolved ? ' is-resolved' : ''}`}>
@@ -19,7 +20,7 @@ export default function AlertBanner({ alert, onResolve }) {
       <div className="incident-content">
         <header className="incident-header">
           <div className="incident-title-row">
-            <h4>{alert.title}</h4>
+            <h4>{displayTitle}</h4>
             <span className="incident-severity">{label}</span>
             {resolved && <span className="incident-resolved"><CheckCircle2 size={12}/> Resolved</span>}
           </div>

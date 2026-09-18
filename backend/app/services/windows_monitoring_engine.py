@@ -82,7 +82,8 @@ class WindowsMonitoringEngine:
             try:
                 observed = await provider.check_services([x.name for x in services])
                 elapsed = round((perf_counter() - started) * 1000, 2)
-                for item in services: await self._apply_service_result(db, item, observed.get(item.name, "unknown"), None, elapsed, now)
+                for item in services: await self._apply_service_result(
+                    db, item, observed.get(item.name, "unknown"), None, elapsed, now, device.name)
                 last_metric = self._last_metric_check.get(device_id)
                 if enabled_metrics and (not last_metric or now - last_metric >= timedelta(seconds=60)):
                     values = await provider.collect_system_metrics()
@@ -105,7 +106,7 @@ class WindowsMonitoringEngine:
             await db.commit()
 
     async def _apply_service_result(self, db, item, observed: str, error_code: str | None,
-                                    response_ms: float, now: datetime):
+                                    response_ms: float, now: datetime, device_name: str):
         healthy = observed == item.expected_state
         item.monitor_state, item.consecutive_failures, item.consecutive_successes = service_state_transition(
             item.monitor_state, healthy, item.consecutive_failures, item.consecutive_successes,
@@ -113,8 +114,12 @@ class WindowsMonitoringEngine:
         item.state = observed; item.last_checked_at = now; item.next_check_at = now + timedelta(seconds=item.check_interval)
         db.add(ServiceCheckHistory(service_id=item.id, observed_state=observed, monitor_state=item.monitor_state,
             error_code=error_code, response_ms=response_ms, checked_at=now))
-        title = f"Windows service {item.name} on device #{item.device_id}"
-        active = (await db.execute(select(Alert).where(Alert.title == title, Alert.is_resolved.is_(False)))).scalar_one_or_none()
+        title = f"Windows service {item.name} on {device_name}"
+        legacy_title = f"Windows service {item.name} on device #{item.device_id}"
+        active = (await db.execute(select(Alert).where(
+            Alert.title.in_((title, legacy_title)), Alert.is_resolved.is_(False)))).scalar_one_or_none()
+        if active and active.title != title:
+            active.title = title
         if item.monitor_state == "DOWN" and not active:
             active = Alert(severity=AlertSeverity(item.severity), title=title,
                 message=f"Service {item.display_name} is {observed}; expected {item.expected_state}.",
