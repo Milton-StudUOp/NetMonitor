@@ -23,7 +23,6 @@ const Reports = lazy(() => import('./pages/Reports'));
 const SystemHealth = lazy(() => import('./pages/SystemHealth'));
 const ServiceDiscovery = lazy(() => import('./pages/ServiceDiscovery'));
 const ServiceMonitoring = lazy(() => import('./pages/ServiceMonitoring'));
-const Services = lazy(() => import('./pages/Services'));
 const ServiceTopology = lazy(() => import('./pages/ServiceTopology'));
 const MetricsMonitoring = lazy(() => import('./pages/MetricsMonitoring'));
 const MetricsDiscovery = lazy(() => import('./pages/MetricsDiscovery'));
@@ -69,7 +68,6 @@ export default function App() {
                 <Route path="/discovery" element={<Discovery user={user} />} />
                 <Route path="/service-discovery" element={<Suspense fallback={loadingPage}><ServiceDiscovery user={user} /></Suspense>} />
                 <Route path="/service-monitoring" element={<Suspense fallback={loadingPage}><ServiceMonitoring /></Suspense>} />
-                <Route path="/services" element={<Suspense fallback={loadingPage}><Services user={user} /></Suspense>} />
                 <Route path="/service-topology" element={<Suspense fallback={loadingPage}><ServiceTopology /></Suspense>} />
                 <Route path="/services/:serviceId" element={<Suspense fallback={loadingPage}><ServiceAnalytics /></Suspense>} />
                 <Route path="/metrics-monitoring" element={<Suspense fallback={loadingPage}><MetricsMonitoring /></Suspense>} />

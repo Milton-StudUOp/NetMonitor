@@ -101,18 +101,6 @@ async def monitored_services_inventory(db: AsyncSession = Depends(get_db)):
         "ip_address": devices[item.device_id].ip_address} for item in services if item.device_id in devices]
 
 
-@router.get("/services/catalog")
-async def services_catalog(db: AsyncSession = Depends(get_db)):
-    services = (await db.execute(select(DiscoveredService).order_by(
-        DiscoveredService.device_id, DiscoveredService.display_name))).scalars().all()
-    device_ids = {item.device_id for item in services}
-    devices = {item.id: item for item in (await db.execute(
-        select(Device).where(Device.id.in_(device_ids)))).scalars().all()} if device_ids else {}
-    return [{**_service(item), "device_name": devices[item.device_id].name,
-        "ip_address": devices[item.device_id].ip_address, "device_status": devices[item.device_id].status.value}
-        for item in services if item.device_id in devices]
-
-
 @router.post("/devices/{device_id}/services/discover")
 async def discover_services(device_id: int, db: AsyncSession = Depends(get_db)):
     device = await db.get(Device, device_id)
