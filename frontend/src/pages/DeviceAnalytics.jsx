@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Activity, ArrowLeft, Clock3, Gauge, Server, ShieldCheck, TimerOff } from 'lucide-react';
+import { Activity, ArrowLeft, Clock3, Gauge, Server, ShieldCheck, TimerOff, Save, TestTube } from 'lucide-react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Area, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import api from '../api/client';
@@ -33,6 +33,7 @@ export default function DeviceAnalytics() {
   return <div>
     <div className="analytics-header"><div className="analytics-heading"><button className="icon-button" onClick={() => navigate(returnTo)} title={returnTo === '/devices' ? 'Back to devices' : 'Back to topology'} aria-label={returnTo === '/devices' ? 'Back to devices' : 'Back to topology'}><ArrowLeft size={18} /></button><div><div className="analytics-title-line"><h2>{device.name}</h2><span className={`badge badge-${device.status?.toLowerCase() || 'unknown'}`}>{device.status}</span></div><p>{device.ip_address || 'No IP address'} · {device.device_type} · {device.location || 'No location'}</p></div></div><div className="period-selector">{periods.map(([value, label]) => <button key={value} className={period === value ? 'active' : ''} onClick={() => setPeriod(value)}>{label}</button>)}</div></div>
     {error && <div className="notice error">Could not refresh metrics: {error}</div>}
+    <WindowsMonitoring device={device} />
     <div className="metric-summary-grid">
       <div className="metric-summary-card"><ShieldCheck /><span>Availability</span><strong>{summary.availability_pct == null ? 'No data' : `${summary.availability_pct}%`}</strong><small>{summary.successful_probes || 0} successful of {summary.total_probes || 0} probes</small></div>
       <div className="metric-summary-card"><Gauge /><span>Average latency</span><strong>{summary.average_latency_ms == null ? '—' : `${summary.average_latency_ms} ms`}</strong><small>Maximum {summary.maximum_latency_ms == null ? '—' : `${summary.maximum_latency_ms} ms`}</small></div>
@@ -49,3 +50,22 @@ export default function DeviceAnalytics() {
 }
 
 function EmptyMetrics() { return <div className="chart-empty"><Server size={28}/><strong>No monitoring data</strong><span>Metrics will appear after the monitoring engine records probes.</span></div>; }
+
+function WindowsMonitoring({ device }) {
+  const [form, setForm] = useState({ username:'', password:'', port:5986, use_https:true, verify_certificate:true, authentication:'NTLM', enabled:true });
+  const [result, setResult] = useState(null); const [busy, setBusy] = useState(''); const [notice, setNotice] = useState('');
+  useEffect(() => {
+    if (!device?.id) return;
+    api.get(`/devices/${device.id}/windows-monitoring`).then(r => r.data && setForm(f => ({...f,...r.data,password:''}))).catch(() => {});
+  }, [device?.id]);
+  const save = async e => { e.preventDefault(); setBusy('save'); setNotice(''); try { await api.put(`/devices/${device.id}/windows-monitoring`, form); setForm(f=>({...f,password:''})); setNotice('Windows monitoring connection saved securely.'); } catch(e) { setNotice(getApiErrorMessage(e)); } finally { setBusy(''); } };
+  const test = async () => { setBusy('test'); setNotice(''); try { const r=await api.post(`/devices/${device.id}/windows-monitoring/test`); setResult(r.data); if(r.data.status!=='READY') setNotice(r.data.message); } catch(e) { setNotice(getApiErrorMessage(e)); } finally { setBusy(''); } };
+  return <section className="glass-card analytics-panel" style={{marginBottom:'18px'}}><div className="panel-title"><div><h3>Windows Monitoring</h3><p>Securely test compatibility before discovering services and metrics.</p></div>{result&&<span className={`badge badge-${result.status==='READY'?'online':'offline'}`}>{result.status}</span>}</div>
+    {notice&&<div className={`notice ${result?.status==='READY'?'success':'error'}`}>{notice}</div>}
+    <form onSubmit={save}><div className="form-row"><div className="form-group"><label className="form-label">Monitoring account</label><input className="form-input" required value={form.username} onChange={e=>setForm({...form,username:e.target.value})}/></div><div className="form-group"><label className="form-label">{form.password_configured?'New password (leave blank to keep current)':'Password'}</label><input className="form-input" type="password" required={!form.password_configured} value={form.password} onChange={e=>setForm({...form,password:e.target.value})}/></div></div>
+      <div className="form-row"><div className="form-group"><label className="form-label">Authentication</label><select className="form-select" value={form.authentication} onChange={e=>setForm({...form,authentication:e.target.value})}><option>NTLM</option><option>KERBEROS</option><option>CREDSSP</option></select></div><div className="form-group"><label className="form-label">Port</label><input className="form-input" type="number" min="1" max="65535" value={form.port} onChange={e=>setForm({...form,port:Number(e.target.value)})}/></div></div>
+      <label className="check-line"><input type="checkbox" checked={form.use_https} onChange={e=>setForm({...form,use_https:e.target.checked,port:e.target.checked?5986:5985})}/> Use encrypted HTTPS connection</label><label className="check-line"><input type="checkbox" checked={form.verify_certificate} disabled={!form.use_https} onChange={e=>setForm({...form,verify_certificate:e.target.checked})}/> Verify server certificate</label>
+      <div className="row-actions"><button className="btn btn-primary" disabled={!!busy}><Save size={15}/>{busy==='save'?'Saving…':'Save Connection'}</button><button type="button" className="btn btn-secondary" disabled={!!busy||!form.password_configured&&!form.password} onClick={test}><TestTube size={15}/>{busy==='test'?'Testing…':'Test Connection'}</button></div></form>
+    {result&&<div className="device-facts" style={{marginTop:'18px'}}><dl><div><dt>Connectivity</dt><dd>{result.connectivity?'✓':'—'}</dd></div><div><dt>WinRM</dt><dd>{result.winrm?'✓':'—'}</dd></div><div><dt>Authentication</dt><dd>{result.authentication?'✓':'—'}</dd></div><div><dt>Windows</dt><dd>{result.operating_system||'Unknown'}</dd></div><div><dt>Provider</dt><dd>{result.provider_mode==='LEGACY_WMI'?'Legacy compatible':result.provider_mode||'Unavailable'}</dd></div><div><dt>Service Discovery</dt><dd>{result.service_discovery?'Supported':'Unavailable'}</dd></div></dl>{result.status==='READY'&&<strong>Ready for Discovery</strong>}<details><summary>Advanced diagnostics</summary><pre>{JSON.stringify({error_code:result.error_code,powershell_version:result.powershell_version,capabilities:result.capabilities,diagnostics:result.diagnostics},null,2)}</pre></details></div>}
+  </section>;
+}

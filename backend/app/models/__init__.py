@@ -5,6 +5,7 @@ from app.models.link import Link, LinkPriority, LinkStatus, LinkType  # noqa: F4
 from app.models.redundancy_group import RedundancyGroup, RedundancyStatus, RedundancyType, ServiceCheckType  # noqa: F401
 from app.models.monitoring_result import MetricAggregate, MonitoringResult, MonitoringTargetType, MonitoringStatus  # noqa: F401
 from app.models.alert import Alert, AlertSeverity  # noqa: F401
+from app.models.monitoring_provider import DeviceCapability, DeviceMonitoringCredential  # noqa: F401
 from app.models.platform import (AuditLog, DatabaseConnection, DatabaseDataSource, DatabaseSchemaVersion, IconAsset, NotificationDelivery,
                                  NotificationIntegration, NotificationRule, SystemSetting, TopologyPosition, TopologySnapshot,
                                  UserAccount, AuthSession, PasswordResetToken)  # noqa: F401
@@ -17,6 +18,7 @@ __all__ = [
     "RedundancyGroup", "RedundancyStatus", "RedundancyType", "ServiceCheckType",
     "MonitoringResult", "MonitoringTargetType", "MonitoringStatus", "MetricAggregate",
     "Alert", "AlertSeverity",
+    "DeviceCapability", "DeviceMonitoringCredential",
     "AuditLog", "DatabaseConnection", "DatabaseDataSource", "DatabaseSchemaVersion", "IconAsset", "NotificationDelivery", "NotificationIntegration",
     "NotificationRule", "SystemSetting", "TopologyPosition", "TopologySnapshot", "UserAccount", "AuthSession", "PasswordResetToken",
 ]

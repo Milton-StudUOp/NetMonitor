@@ -1,321 +1,617 @@
-# NetMonitor Improvement Roadmap
+# NetMonitor — Services & Metrics Discovery
 
-This document tracks approved improvements and proposals. Implemented items are marked explicitly.
+Implement a professional **Services & Metrics Discovery and Monitoring module** for devices already registered in NetMonitor.
 
-## Guiding principles
+The solution must support **Windows Server 2008 R2 and newer Windows Server versions**, while keeping the NetMonitor backend running on **Linux**.
 
-- Remain compatible with SQLite, PostgreSQL, MySQL, SQL Server, and Oracle.
-- Prefer portable SQLAlchemy queries over database-specific SQL.
-- Keep discovery and monitoring traffic safe for production networks.
-- Make operational state understandable without requiring specialist knowledge.
-- Protect credentials, personal data, audit records, and administrative operations.
-- Design high-volume metric storage with retention and aggregation from the beginning.
+The implementation must integrate with the existing architecture without breaking current device monitoring.
 
-## Priority 1 — Production foundation
+## Core Workflow
 
-### 1. Authentication and role-based access control
+For a registered device that is Online:
 
-Add local authentication initially, with a design that can later support LDAP, Active Directory, or OIDC.
+**Device → Discover Services & Metrics → Review → Select → Configure → Monitor → Alert → History**
 
-Suggested roles:
+The interface must be simple enough that the user does not need to understand WinRM, WMI, CIM or PowerShell.
 
-- **Viewer:** read dashboards, topology, metrics, alerts, and reports.
-- **Operator:** acknowledge incidents, run approved discovery profiles, and manage maintenance windows.
-- **Administrator:** manage users, integrations, databases, retention, templates, and aggressive discovery.
+---
 
-Acceptance criteria:
+# 1. Windows Monitoring Compatibility Layer
 
-- Every non-public API requires authentication.
-- Permissions are enforced by the backend, not only hidden in the frontend.
-- Login, logout, failed authentication, and administrative actions are audited.
-- Passwords use a modern adaptive hash and tokens have controlled expiration.
-- A first-administrator bootstrap procedure is documented.
+Do NOT tightly couple NetMonitor directly to one Windows management technology.
 
-### 2. Metric retention and aggregation
+Create a backend abstraction such as:
 
-The `monitoring_results` table will grow rapidly and should not remain an unlimited raw-event table.
+`WindowsMonitoringProvider`
 
-Add:
+Conceptually:
 
-- Configurable raw-data retention.
-- Hourly and daily aggregates.
-- Background cleanup with visible job status.
-- Compound indexes for target, status, and timestamp.
-- Server-side pagination for all historical views.
-- Streaming exports for large reports.
-- Database-aware batch sizes without changing business behavior between engines.
+```text
+NetMonitor Linux
+       │
+       ▼
+WindowsMonitoringProvider
+       │
+       ├── Connection / Capability Detection
+       │
+       ├── Modern Windows Provider
+       │      └── PowerShell / CIM where supported
+       │
+       └── Legacy Windows Provider
+              └── PowerShell / WMI-compatible commands
+                       │
+                       ▼
+                 Windows Server
+```
 
-Acceptance criteria:
+The rest of NetMonitor must receive normalized results regardless of which provider was used.
 
-- Retention runs safely on every supported database.
-- Aggregated reports remain available after raw samples expire.
-- Cleanup never blocks the monitoring loop.
-- Administrators can preview affected record counts before deletion.
+Example normalized service:
 
-### 3. NetMonitor self-monitoring
+```json
+{
+  "name": "MSSQLSERVER",
+  "display_name": "SQL Server (MSSQLSERVER)",
+  "state": "running",
+  "start_mode": "automatic",
+  "monitoring_provider": "windows"
+}
+```
 
-Expose the health of the monitoring platform itself:
+Do not expose implementation differences to the frontend unless needed for diagnostics.
 
-- Database connectivity and query latency.
-- Monitoring-cycle duration and last successful cycle.
-- Number of delayed or failed checks.
-- Notification queue and delivery failures.
-- Discovery jobs and poller load.
-- Database size and metric growth rate.
-- Backend CPU, memory, file descriptors, and disk usage.
+---
 
-Provide a dedicated **System Health** page and include critical failures in notifications.
+# 2. Compatibility Requirements
 
-## Priority 2 — Monitoring depth
+Target:
 
-### 4. SNMP performance metrics
+**Windows Server 2008 R2 → newer supported Windows Server versions**
 
-Expand monitoring beyond reachability:
+During the first connection/discovery, detect available capabilities where possible, including:
 
-- Device uptime.
-- CPU and memory utilization.
-- Temperature, fan, and power-supply state when supported.
-- Interface administrative and operational state.
-- Interface speed and utilization percentage.
-- Incoming and outgoing traffic.
-- Errors, discards, and packet drops.
-- 95th-percentile bandwidth utilization.
+* Windows version
+* PowerShell version
+* WinRM availability
+* Available management mechanism
+* Authentication/connectivity status
 
-Metric names, units, and labels should be centralized and consistent. Counter rollover, device reboot, and 32-bit/64-bit interface counters must be handled correctly.
+Select the safest compatible discovery method automatically.
 
-Acceptance criteria:
+For modern systems, prefer appropriate PowerShell/CIM mechanisms.
 
-- Missing OIDs do not make the entire device check fail.
-- Counter resets do not generate false traffic spikes.
-- Charts clearly identify units and collection gaps.
-- Metric support is visible before a template is assigned.
+For older systems such as Windows Server 2008 R2, provide a compatible fallback using available PowerShell/WMI functionality.
 
-### 5. Monitoring templates
+Do not assume modern PowerShell cmdlets exist on every target.
 
-Introduce reusable templates similar to mature monitoring platforms.
+---
 
-Initial templates:
+# 3. Linux Backend
 
-- Generic ICMP device.
-- Generic SNMP device.
-- Cisco switch/router.
-- MikroTik RouterOS.
-- FortiGate firewall.
-- Ubiquiti access point/radio.
-- Linux server.
-- Windows server.
+NetMonitor remains Linux-based.
 
-A template should define checks, intervals, retry policy, thresholds, supported metrics, default icon, and notification recommendations. Devices may override individual values without modifying the template.
+Do not require Windows software to run on the NetMonitor server merely to perform Windows monitoring.
 
-### 6. Service and port monitoring
+Use an appropriate Python-compatible WinRM/WS-Management client or equivalent transport implementation.
 
-Add explicit service checks independent of discovery:
+Keep the transport implementation isolated from the monitoring business logic.
 
-- TCP connection.
-- HTTP/HTTPS response, status code, latency, and certificate expiry.
-- DNS resolution.
-- SMTP, IMAP, and database port reachability.
-- Optional content matching.
-- Custom command/plugin interface with strict execution controls.
+Conceptually:
 
-Service failures should appear in device analytics, topology context, alerts, and reports.
+```text
+Linux NetMonitor
+       │
+       │ WinRM / WS-Management
+       ▼
+Windows Server
+       │
+       ├── PowerShell
+       ├── CIM/WMI
+       └── Windows Services
+```
 
-## Priority 3 — Incident operations
+---
 
-### 7. Complete incident lifecycle
+# 4. Secure Connectivity
 
-Extend alerts into operational incidents with:
+Support WinRM connectivity using appropriate authentication mechanisms.
 
-- Acknowledgement and assigned operator.
-- Comments and activity history.
-- Active, acknowledged, resolved, suppressed, and reopened states.
-- Manual and automatic resolution reason.
-- Escalation after configurable durations.
-- Reminder limits and notification cooldown.
-- Related-alert grouping.
-- Root-cause incident linked to affected downstream devices.
+Prefer secure configurations suitable for production.
 
-All transitions must record actor, timestamp, previous state, new state, and reason.
+Where supported/configured:
 
-### 8. Maintenance windows and silencing
+**TCP 5986 — WinRM over HTTPS**
 
-Add maintenance schedules for devices, links, groups, services, or locations.
+Do not weaken Windows security globally simply to make discovery work.
 
-Required behavior:
+Avoid insecure configurations such as blindly enabling unencrypted transport or broadly configuring TrustedHosts.
 
-- One-time and recurring windows.
-- Timezone-aware scheduling.
-- Optional monitoring continuation while notifications are suppressed.
-- Visible maintenance state in topology and device lists.
-- SLA reports can include or exclude planned maintenance.
-- Emergency silence requires a reason and expiration time.
+Credentials must:
 
-### 9. Notification reliability
+* Never be stored in plaintext
+* Never appear in frontend responses
+* Never appear in application logs
+* Never appear in exception messages
+* Use the existing NetMonitor secure credential mechanism
 
-Improve the delivery pipeline with:
+Use least-privilege monitoring accounts wherever possible.
 
-- Persistent notification queue.
-- Retry with exponential backoff.
-- Dead-letter state for exhausted deliveries.
-- Per-provider rate limiting.
-- Delivery history linked to each incident.
-- Message templates with preview and test data.
-- Provider health and last successful delivery.
-- Clear distinction between incident, reminder, escalation, and recovery messages.
+---
 
-## Priority 4 — User experience and reporting
+# 5. Connection Test
 
-### 10. Custom dashboards
+Before discovery, provide:
 
-Allow users to create and save dashboards containing:
+**Test Connection**
 
-- Availability and SLA widgets.
-- Critical devices and active incidents.
-- Highest latency and packet loss.
-- Top interfaces by utilization.
-- Devices with the most downtime.
-- Redundancy state.
-- Compact topology.
-- Group, location, tag, and period filters.
+Return a user-friendly result such as:
 
-Dashboard layouts and filters should be stored per user in the active database.
+```text
+SERVER-OCC-01
 
-### 11. Advanced device analytics
+Connectivity       ✓
+WinRM               ✓
+Authentication      ✓
+Windows             Server 2019
+PowerShell          Available
+Service Discovery   Supported
 
-Enhance the existing device metric view with:
+Ready for Discovery
+```
 
-- Compare current period with previous period.
-- Zoomable graphs and selectable metrics.
-- Annotations for outages, maintenance, and configuration changes.
-- Interface-level drill-down.
-- Baselines and anomaly indication.
-- Export graph as PNG and data as CSV.
-- Shareable, permission-checked URLs.
+For legacy systems:
 
-### 12. SLA and executive reporting
+```text
+SERVER-LEGACY-01
 
-Add:
+Connectivity       ✓
+WinRM               ✓
+Authentication      ✓
+Windows             Server 2008 R2
+Legacy Provider     ✓
+Service Discovery   Supported
 
-- SLA targets per device, service, group, or customer.
-- Business-hour calendars.
-- Planned-maintenance exclusions.
-- Error budgets and burn rate.
-- MTTR, MTBF, incident count, and availability trends.
-- Scheduled PDF/CSV delivery.
-- Report branding and reusable report definitions.
-- Comparison by location, group, provider, or device type.
+Ready for Discovery
+```
 
-Calculations must have documented formulas and produce equivalent results on every supported database.
+Do not display unnecessary protocol complexity to normal users.
 
-### 13. Inventory and configuration history
+Technical details may be available under **Advanced / Diagnostics**.
 
-Track operational inventory changes:
+---
 
-- Device and interface attributes over time.
-- Discovery reconciliation: new, changed, missing, or unmanaged assets.
-- Configuration change audit.
-- Tags, owners, service importance, warranty, and asset identifiers.
-- Duplicate detection by IP, hostname, serial number, or SNMP engine ID.
+# 6. Service Discovery
 
-Discovery should propose changes for approval instead of silently overwriting managed data.
+Provide:
 
-## Priority 5 — Scale and integration
+**Discover Services & Metrics**
 
-### 14. Distributed pollers
+For Windows Services retrieve, where available:
 
-Support remote sites and segmented networks through pollers:
+* Name
+* Display Name
+* State
+* Start Mode
+* Description
+* Service account if appropriate
+* Additional useful metadata when inexpensive to retrieve
 
-- Secure registration and mutual authentication.
-- Assignment of devices or network ranges.
-- Local buffering during central-server outages.
-- Controlled concurrency and resource limits.
-- Version and health visibility.
-- No database credentials stored on pollers.
+For legacy Windows, use commands compatible with that environment.
 
-The central server remains the source of truth for configuration and reporting.
+Batch service discovery.
 
-### 15. Public API, webhooks, and integrations
+Do NOT create a separate WinRM connection/request for every Windows service.
 
-Provide a documented, versioned API and outbound webhooks for:
+---
 
-- Device and topology changes.
-- Incident creation, acknowledgement, and recovery.
-- SLA violations.
-- Discovery completion.
-- Notification delivery failures.
+# 7. Discovery vs Monitoring
 
-Add scoped API tokens, expiration, rotation, revocation, rate limits, and audit logging. Candidate integrations include ticketing systems, SIEM platforms, Grafana, and automation tools.
+Maintain a strict distinction:
 
-### 16. High availability and disaster recovery
+**Discovered Service**
 
-Plan for:
+A service found on the Windows device.
 
-- Multiple backend instances.
-- Distributed job and notification queues.
-- Leader election for scheduled monitoring.
-- Health-aware load balancing.
-- Scheduled encrypted backups.
-- Automated restore verification.
-- Documented recovery point and recovery time objectives.
+**Monitored Service**
 
-In-memory discovery jobs and process-local state must move to a shared store before horizontal scaling.
+A discovered service explicitly selected for continuous monitoring.
 
-## Cross-cutting quality improvements
+Never monitor every discovered Windows service automatically.
 
-These should accompany every approved feature:
+A Windows server may contain hundreds of legitimate stopped/manual services.
 
-- API pagination and stable response schemas.
-- Structured error codes for frontend messages.
-- Accessibility and keyboard navigation.
-- Responsive layouts and consistent empty/loading/error states.
-- Unit, integration, migration, and browser-level tests.
-- Performance budgets for API queries and frontend bundles.
-- Secrets excluded from logs, exports, backups, and API responses.
-- Migration tests for all supported database engines.
-- Operational documentation and rollback procedures.
+The UI should provide:
 
-## Recommended delivery sequence
+* Search
+* Running/Stopped filter
+* Automatic/Manual/Disabled filter
+* Multi-selection
+* Bulk actions
+* Rediscovery
+* Monitor Selected
+* Stop Monitoring
 
-### Phase A — Secure and stabilize
+---
 
-Status: **implemented**. Production activation requires setting unique secrets and completing the first-administrator bootstrap described in `README.md`.
+# 8. Monitoring Configuration
 
-1. Authentication and RBAC.
-2. Metric retention, aggregation, indexes, and pagination.
-3. NetMonitor self-monitoring.
+For selected services support:
 
-### Phase B — Improve monitoring value
+**Expected State:** Running / Stopped
+**Check Interval:** configurable
+**Failure Threshold:** configurable
+**Recovery Threshold:** configurable
+**Severity:** Info / Warning / Critical
+**Notifications:** Enabled / Disabled
 
-1. SNMP performance metrics.
-2. Monitoring templates.
-3. Service checks.
+Recommended defaults:
 
-### Phase C — Professional incident management
+```text
+Expected State       Running
+Check Interval       60 seconds
+Failure Threshold    3
+Recovery Threshold   2
+```
 
-1. Acknowledgement, ownership, and incident timeline.
-2. Maintenance windows and silencing.
-3. Persistent notification queue and escalation.
+State handling:
 
-### Phase D — Reporting and scale
+**UP → SUSPECTED → DOWN → RECOVERING → UP**
 
-1. Custom dashboards and enhanced analytics.
-2. SLA definitions and scheduled reports.
-3. Distributed pollers, public API, and high availability.
+Do not generate a DOWN event from a single temporary communication failure.
 
-## Evaluation checklist
+---
 
-For each proposal, decide:
+# 9. Intelligent Polling
 
-- [ ] Approved, rejected, or postponed.
-- [ ] Expected users and operational problem solved.
-- [ ] Priority and target release.
-- [ ] Required database migrations.
-- [ ] Security and permission requirements.
-- [ ] Expected metric/event volume.
-- [ ] Multidatabase test coverage.
-- [ ] Upgrade and rollback strategy.
-- [ ] Documentation and training requirements.
+Use existing NetMonitor device status before performing Windows monitoring.
 
-## Suggested next decision
+```text
+Device DOWN
+    ↓
+Skip Windows service polling
 
-The recommended next package is **Phase A — Secure and stabilize**. Authentication should come first because future administrative features, distributed pollers, API tokens, scheduled exports, and incident ownership all depend on a reliable user and permission model.
+Device UP
+    ↓
+Windows monitoring check
+    ↓
+Retrieve selected services in batch
+```
+
+Avoid creating hundreds of concurrent remote sessions.
+
+Implement:
+
+* Controlled concurrency
+* Worker limits
+* Timeouts
+* Retry limits
+* Connection/session reuse where safe
+* Backoff after repeated communication failures
+* Batch retrieval
+
+The architecture must support the existing **100+ devices** and future growth.
+
+---
+
+# 10. Metrics Discovery
+
+The compatibility layer must eventually support more than Windows Services.
+
+Design provider interfaces for:
+
+### System
+
+* CPU
+* Memory
+* Uptime
+
+### Storage
+
+* Disk usage
+* Free space
+* Disk information
+
+### Network
+
+* Interfaces
+* Interface status
+* Traffic counters where available
+
+### Windows
+
+* Services
+* Processes
+* Selected system information
+* Event-related monitoring where appropriate
+
+Capabilities may differ between Windows versions.
+
+The provider must return only supported capabilities.
+
+---
+
+# 11. Capability Discovery
+
+Maintain a device capability inventory.
+
+Example:
+
+```json
+{
+  "device": "SERVER-OCC-01",
+  "platform": "windows",
+  "capabilities": {
+    "services": true,
+    "cpu": true,
+    "memory": true,
+    "storage": true,
+    "network_interfaces": true,
+    "processes": true
+  }
+}
+```
+
+This architecture should later allow additional providers:
+
+```text
+MonitoringProvider
+│
+├── WindowsProvider
+│
+├── LinuxProvider
+├── SNMPProvider
+├── HTTPProvider
+└── AgentProvider
+```
+
+Do not hard-code the overall monitoring engine specifically around Windows.
+
+---
+
+# 12. Error Classification
+
+This is critical.
+
+Differentiate between:
+
+**DEVICE_DOWN**
+
+Host itself is unavailable.
+
+**WINRM_UNAVAILABLE**
+
+Device is online but remote management cannot be reached.
+
+**AUTHENTICATION_FAILED**
+
+Credentials were rejected.
+
+**PERMISSION_DENIED**
+
+Account authenticated but lacks required permissions.
+
+**DISCOVERY_FAILED**
+
+Connection works but discovery operation failed.
+
+**CHECK_TIMEOUT**
+
+Monitoring operation exceeded timeout.
+
+**SERVICE_DOWN**
+
+Connection succeeded and Windows explicitly reports the monitored service is not in its expected state.
+
+**UNKNOWN**
+
+Status cannot currently be determined.
+
+Never convert:
+
+`WinRM timeout`
+
+into:
+
+`MSSQLSERVER DOWN`
+
+That would create misleading operational alarms.
+
+---
+
+# 13. User Experience
+
+Inside a device:
+
+```text
+SERVER-OCC-01                         ● ONLINE
+
+Overview | Monitoring | Services | Metrics | History
+
+Windows Monitoring
+Connection                             ✓ Connected
+
+Services
+────────────────────────────────────────────────
+Search...
+
+☑ OCC Communication    Running      Automatic
+☑ MSSQLSERVER          Running      Automatic
+☐ Windows Update       Stopped      Manual
+☐ Print Spooler        Stopped      Manual
+
+[ Rediscover ]                 [ Monitor Selected ]
+```
+
+Normal users should interact with:
+
+**Discover → Select → Monitor**
+
+Advanced users may access:
+
+**Advanced → Connection / Provider / Diagnostics**
+
+Keep protocol-specific terminology away from the normal workflow.
+
+---
+
+# 14. Monitoring Profiles
+
+Prepare support for reusable templates:
+
+**Windows Server — Standard**
+
+**Database Server**
+
+**OCC Server**
+
+**Critical Infrastructure**
+
+Profiles should define:
+
+* Services
+* Metrics
+* Thresholds
+* Check intervals
+* Failure thresholds
+* Recovery thresholds
+* Severity
+
+This allows one monitoring policy to be applied consistently across multiple servers.
+
+---
+
+# 15. Device Health
+
+Do not treat Ping as complete device health.
+
+Model:
+
+```text
+SERVER-OCC-01
+ONLINE
+
+Availability       ✓
+Windows Services   ✓
+CPU                ✓
+Memory              ✓
+Storage             ⚠
+Network             ✓
+```
+
+A device can therefore be:
+
+**Reachable but Operationally Degraded**
+
+Example:
+
+```text
+Ping             UP
+Windows          Reachable
+OCC Service      DOWN
+SQL Server       UP
+CPU              Normal
+Memory           Normal
+```
+
+This distinction is one of the primary objectives of this feature.
+
+---
+
+# 16. Performance
+
+Discovery and monitoring must be separate workloads.
+
+Recommended model:
+
+```text
+PING
+10–30 seconds
+
+SELECTED SERVICES
+30–60+ seconds depending on criticality
+
+SYSTEM METRICS
+60+ seconds
+
+FULL DISCOVERY
+Manual / scheduled infrequently
+```
+
+Do not repeatedly enumerate every Windows service every 30 seconds.
+
+After discovery, continuous checks should focus only on selected monitored services and metrics.
+
+---
+
+# 17. Implementation Phases
+
+Implement incrementally.
+
+### Phase 1 — Compatibility & Connectivity
+
+Implement `WindowsMonitoringProvider`, WinRM transport, capability detection, secure credential handling and **Test Connection**.
+
+Validate against at least:
+
+* Windows Server 2008 R2
+* One modern Windows Server version available in the environment
+
+### Phase 2 — Service Discovery
+
+Implement service discovery, normalization, inventory and UI.
+
+### Phase 3 — Service Monitoring
+
+Implement selection, configuration, background polling, state transitions and history.
+
+### Phase 4 — System Metrics
+
+CPU, memory, uptime and storage.
+
+### Phase 5 — Health & Alerts
+
+Thresholds, health visualization, alert integration and historical reporting.
+
+### Phase 6 — Profiles & Extended Providers
+
+Monitoring templates and preparation for Linux/SNMP/Agent providers.
+
+---
+
+# 18. Mandatory Testing
+
+Before considering the feature complete, test:
+
+* Windows Server 2008 R2 compatibility
+* Modern Windows Server compatibility
+* Correct credentials
+* Wrong credentials
+* Insufficient permissions
+* WinRM disabled
+* Firewall blocking WinRM
+* Device offline
+* Service running
+* Service stopped
+* Service restarting
+* Timeout
+* Temporary network interruption
+* Rediscovery
+* 100+ device scalability behavior
+
+Existing NetMonitor monitoring must continue operating normally during failures of the Windows monitoring subsystem.
+
+---
+
+# Final Requirement
+
+The architecture must allow NetMonitor to evolve from:
+
+**“Is the device reachable?”**
+
+to:
+
+**“Is the device reachable, are its critical services operating, are its resources healthy, and what specifically requires attention?”**
+
+Implement this as a **modular monitoring framework**, not as a Windows-only feature bolted directly into the existing ping engine.
+
+Preserve existing functionality, prioritize backward compatibility, security, performance and a professional user experience.

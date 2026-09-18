@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
@@ -6,7 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.device import Device, DeviceStatus
 from app.models.link import Link, LinkPriority, LinkStatus, LinkType
+from app.models.monitoring_provider import DeviceCapability, DeviceMonitoringCredential
 from app.schemas.device import DeviceCreate, DeviceRead, DeviceUpdate, DeviceStatusRead
+from app.schemas.monitoring_provider import WindowsCapabilityRead, WindowsConnectionInput, WindowsConnectionRead
+from app.security import decrypt_secret, encrypt_secret
+from app.services.windows_monitoring import WinRMTransport, WindowsMonitoringError, WindowsMonitoringProvider
 
 router = APIRouter(prefix="/api/devices", tags=["Devices"])
 
@@ -136,6 +141,90 @@ async def get_device(device_id: int, db: AsyncSession = Depends(get_db)):
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
     return device
+
+
+@router.get("/{device_id}/windows-monitoring", response_model=WindowsConnectionRead | None)
+async def get_windows_monitoring(device_id: int, db: AsyncSession = Depends(get_db)):
+    if not await db.get(Device, device_id):
+        raise HTTPException(status_code=404, detail="Device not found")
+    credential = (await db.execute(select(DeviceMonitoringCredential).where(
+        DeviceMonitoringCredential.device_id == device_id,
+        DeviceMonitoringCredential.provider == "WINDOWS"))).scalar_one_or_none()
+    if not credential: return None
+    return WindowsConnectionRead.model_validate(credential)
+
+
+@router.put("/{device_id}/windows-monitoring", response_model=WindowsConnectionRead)
+async def configure_windows_monitoring(device_id: int, data: WindowsConnectionInput,
+                                       db: AsyncSession = Depends(get_db)):
+    if not await db.get(Device, device_id):
+        raise HTTPException(status_code=404, detail="Device not found")
+    credential = (await db.execute(select(DeviceMonitoringCredential).where(
+        DeviceMonitoringCredential.device_id == device_id,
+        DeviceMonitoringCredential.provider == "WINDOWS"))).scalar_one_or_none()
+    if not credential:
+        if not data.password:
+            raise HTTPException(status_code=400, detail="Password is required for the first configuration")
+        credential = DeviceMonitoringCredential(device_id=device_id, provider="WINDOWS",
+            username=data.username, encrypted_password=encrypt_secret(data.password))
+        db.add(credential)
+    credential.username = data.username
+    credential.port = data.port
+    credential.use_https = data.use_https
+    credential.verify_certificate = data.verify_certificate
+    credential.authentication = data.authentication
+    credential.enabled = data.enabled
+    if data.password: credential.encrypted_password = encrypt_secret(data.password)
+    await db.commit(); await db.refresh(credential)
+    return WindowsConnectionRead.model_validate(credential)
+
+
+@router.post("/{device_id}/windows-monitoring/test", response_model=WindowsCapabilityRead)
+async def test_windows_monitoring(device_id: int, db: AsyncSession = Depends(get_db)):
+    device = await db.get(Device, device_id)
+    if not device: raise HTTPException(status_code=404, detail="Device not found")
+    if not device.ip_address: raise HTTPException(status_code=400, detail="Device has no IP address")
+    if device.status != DeviceStatus.ONLINE:
+        raise HTTPException(status_code=409, detail="Device must be online before Windows monitoring is tested")
+    credential = (await db.execute(select(DeviceMonitoringCredential).where(
+        DeviceMonitoringCredential.device_id == device_id,
+        DeviceMonitoringCredential.provider == "WINDOWS",
+        DeviceMonitoringCredential.enabled.is_(True)))).scalar_one_or_none()
+    if not credential: raise HTTPException(status_code=400, detail="Configure Windows monitoring first")
+    capability = (await db.execute(select(DeviceCapability).where(
+        DeviceCapability.device_id == device_id,
+        DeviceCapability.provider == "WINDOWS"))).scalar_one_or_none()
+    if not capability:
+        capability = DeviceCapability(device_id=device_id, provider="WINDOWS", platform="windows")
+        db.add(capability)
+    password = decrypt_secret(credential.encrypted_password)
+    if password is None: raise HTTPException(status_code=409, detail="Stored monitoring credentials cannot be decrypted")
+    provider = WindowsMonitoringProvider(WinRMTransport(device.ip_address, credential.username, password,
+        credential.port, credential.use_https, credential.verify_certificate, credential.authentication))
+    now = datetime.now(timezone.utc)
+    try:
+        detected = await provider.detect_capabilities()
+        capability.provider_mode = detected.provider_mode
+        capability.operating_system = detected.operating_system
+        capability.powershell_version = detected.powershell_version
+        capability.capabilities = detected.capabilities
+        capability.diagnostics = detected.diagnostics
+        capability.last_status = "READY"
+        capability.last_error_code = None
+        capability.discovered_at = now
+        await db.commit()
+        return WindowsCapabilityRead(device_id=device.id, device_name=device.name,
+            connectivity=True, winrm=True, authentication=True, service_discovery=True,
+            status="READY", message="Ready for Discovery", operating_system=detected.operating_system,
+            powershell_version=detected.powershell_version, provider_mode=detected.provider_mode,
+            capabilities=detected.capabilities, diagnostics=detected.diagnostics, discovered_at=now)
+    except WindowsMonitoringError as exc:
+        capability.last_status = "FAILED"; capability.last_error_code = exc.code; capability.discovered_at = now
+        await db.commit()
+        return WindowsCapabilityRead(device_id=device.id, device_name=device.name,
+            connectivity=exc.code not in {"WINRM_UNAVAILABLE", "CHECK_TIMEOUT"}, winrm=False,
+            authentication=exc.code not in {"AUTHENTICATION_FAILED", "WINRM_UNAVAILABLE", "CHECK_TIMEOUT"},
+            service_discovery=False, status="FAILED", error_code=exc.code, message=str(exc), discovered_at=now)
 
 
 @router.put("/{device_id}", response_model=DeviceRead)
