@@ -9,7 +9,7 @@ from app.models.device import Device, DeviceStatus
 from app.models.link import Link, LinkPriority, LinkStatus, LinkType
 from app.models.redundancy_group import RedundancyGroup, RedundancyStatus, RedundancyType
 from app.models.platform import IconAsset
-from app.models.monitoring_provider import DeviceCapability, SystemMetricSnapshot
+from app.models.monitoring_provider import DeviceCapability, DeviceMonitoringCredential, SystemMetricSnapshot
 from app.schemas.topology import (
     DashboardSummary,
     TopologyEdge,
@@ -28,8 +28,16 @@ async def get_topology(db: AsyncSession = Depends(get_db)):
     devices_result = await db.execute(select(Device))
     devices = devices_result.scalars().all()
     icons = {icon.id: icon for icon in (await db.execute(select(IconAsset))).scalars().all()}
-    capabilities = {item.device_id: item for item in (await db.execute(select(DeviceCapability).where(
-        DeviceCapability.provider == "WINDOWS"))).scalars().all()}
+    enabled_providers = {(item.device_id, item.provider) for item in (await db.execute(
+        select(DeviceMonitoringCredential).where(DeviceMonitoringCredential.enabled.is_(True))
+    )).scalars().all()}
+    capability_rows = (await db.execute(select(DeviceCapability).order_by(
+        DeviceCapability.device_id, DeviceCapability.discovered_at.desc(), DeviceCapability.id.desc()
+    ))).scalars().all()
+    capabilities = {}
+    for item in capability_rows:
+        if (item.device_id, item.provider) in enabled_providers and (item.diagnostics or {}).get("enabled_metrics"):
+            capabilities.setdefault(item.device_id, item)
     metric_rows = (await db.execute(select(SystemMetricSnapshot).order_by(
         SystemMetricSnapshot.device_id, SystemMetricSnapshot.collected_at.desc()))).scalars().all()
     latest_metrics = {}

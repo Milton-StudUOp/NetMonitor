@@ -25,6 +25,26 @@ class WindowsConnectionRead(BaseModel):
     password_configured: bool = True
 
 
+class LinuxConnectionInput(BaseModel):
+    username: str = Field(min_length=1, max_length=256)
+    secret: str | None = Field(default=None, max_length=16384)
+    port: int = Field(default=22, ge=1, le=65535)
+    authentication: Literal["SSH_PASSWORD", "SSH_KEY"] = "SSH_PASSWORD"
+    verify_host_key: bool = True
+    host_key: str | None = Field(default=None, max_length=4096)
+    enabled: bool = True
+
+
+class LinuxConnectionRead(BaseModel):
+    username: str
+    port: int
+    authentication: str
+    verify_host_key: bool
+    enabled: bool
+    secret_configured: bool = True
+    host_key: str | None = None
+
+
 class WindowsCapabilityRead(BaseModel):
     device_id: int
     device_name: str

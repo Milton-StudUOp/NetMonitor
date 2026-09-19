@@ -12,6 +12,7 @@ anyio
 async-timeout
 asyncmy
 asyncpg
+asyncssh
 attrs
 certifi
 cffi

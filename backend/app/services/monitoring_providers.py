@@ -2,6 +2,12 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
 
+class MonitoringProviderError(RuntimeError):
+    def __init__(self, code: str, message: str):
+        self.code = code
+        super().__init__(message)
+
+
 @dataclass
 class CapabilityResult:
     operating_system: str | None

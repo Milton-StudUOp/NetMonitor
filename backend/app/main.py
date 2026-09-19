@@ -49,9 +49,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Network Link & Redundancy Monitoring System",
+    title="NetMonitor Infrastructure Monitoring System",
     version="1.0.0",
-    description="Real-time network monitoring system with topology-aware redundancy degradation detection.",
+    description="Real-time network, service, system metrics, topology, and redundancy monitoring.",
     lifespan=lifespan,
 )
 

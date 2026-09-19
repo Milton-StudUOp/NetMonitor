@@ -11,10 +11,11 @@ from app.models.device import Device, DeviceStatus
 from app.models.monitoring_provider import (DeviceCapability, DeviceMonitoringCredential, DiscoveredService,
     MonitoringProfile, ServiceCheckHistory, SystemMetricSnapshot)
 from app.schemas.monitoring_provider import MonitoringProfileInput, ServiceMonitoringUpdate
-from app.security import decrypt_secret
-from app.services.windows_monitoring import WinRMTransport, WindowsMonitoringError, WindowsMonitoringProvider
+from app.services.monitoring_providers import MonitoringProviderError
+from app.services.provider_factory import provider_for_device
+from app.services.metric_alerts import evaluate_metric_alerts
 
-router = APIRouter(prefix="/api", tags=["Windows monitoring"])
+router = APIRouter(prefix="/api", tags=["Services and metrics monitoring"])
 SERVICE_PERIOD_HOURS = {"24h": 24, "7d": 24 * 7, "30d": 24 * 30, "90d": 24 * 90}
 
 
@@ -24,7 +25,7 @@ def _utc(value: datetime) -> datetime:
 
 def _metric_snapshot(item: SystemMetricSnapshot) -> dict:
     details = item.storage if isinstance(item.storage, dict) else {"disks": item.storage or []}
-    return {"id": item.id, "cpu_percent": item.cpu_percent, "memory_percent": item.memory_percent,
+    return {"id": item.id, "device_id": item.device_id, "cpu_percent": item.cpu_percent, "memory_percent": item.memory_percent,
         "uptime_seconds": item.uptime_seconds, "storage": details.get("disks", []),
         "network_interfaces": details.get("network_interfaces", []),
         "network_adapters": details.get("network_adapters", []), "processes": details.get("processes", []),
@@ -32,15 +33,9 @@ def _metric_snapshot(item: SystemMetricSnapshot) -> dict:
         "collected_at": item.collected_at}
 
 
-async def _provider(db: AsyncSession, device: Device) -> WindowsMonitoringProvider:
-    credential = (await db.execute(select(DeviceMonitoringCredential).where(
-        DeviceMonitoringCredential.device_id == device.id, DeviceMonitoringCredential.provider == "WINDOWS",
-        DeviceMonitoringCredential.enabled.is_(True)))).scalar_one_or_none()
-    if not credential: raise HTTPException(400, "Configure Windows monitoring first")
-    password = decrypt_secret(credential.encrypted_password)
-    if password is None: raise HTTPException(409, "Stored monitoring credentials cannot be decrypted")
-    return WindowsMonitoringProvider(WinRMTransport(device.ip_address, credential.username, password,
-        credential.port, credential.use_https, credential.verify_certificate, credential.authentication))
+async def _provider(db: AsyncSession, device: Device):
+    try: return await provider_for_device(db, device)
+    except MonitoringProviderError as exc: raise HTTPException(400, {"code":exc.code,"message":str(exc)}) from exc
 
 
 def _service(item: DiscoveredService) -> dict:
@@ -106,11 +101,15 @@ async def discover_services(device_id: int, db: AsyncSession = Depends(get_db)):
     device = await db.get(Device, device_id)
     if not device: raise HTTPException(404, "Device not found")
     if device.status != DeviceStatus.ONLINE: raise HTTPException(409, "Device must be online before discovery")
-    provider = await _provider(db, device)
+    provider, provider_name = await _provider(db, device)
     try: discovered = await provider.discover_services()
-    except WindowsMonitoringError as exc: raise HTTPException(409, {"code": exc.code, "message": str(exc)}) from exc
-    existing = {x.name: x for x in (await db.execute(select(DiscoveredService).where(
-        DiscoveredService.device_id == device_id))).scalars().all()}
+    except MonitoringProviderError as exc: raise HTTPException(409, {"code": exc.code, "message": str(exc)}) from exc
+    inventory = (await db.execute(select(DiscoveredService).where(
+        DiscoveredService.device_id == device_id))).scalars().all()
+    for stale in inventory:
+        if stale.monitoring_provider != provider_name.lower():
+            stale.monitored = False; stale.monitor_state = "UNKNOWN"; stale.next_check_at = None
+    existing = {x.name: x for x in inventory}
     now = datetime.now(timezone.utc)
     for value in discovered:
         item = existing.get(value["name"])
@@ -231,14 +230,21 @@ async def collect_metrics(device_id: int, db: AsyncSession = Depends(get_db)):
     device = await db.get(Device, device_id)
     if not device: raise HTTPException(404, "Device not found")
     if device.status != DeviceStatus.ONLINE: raise HTTPException(409, "Device must be online before metrics collection")
-    try: values = await (await _provider(db, device)).collect_system_metrics()
-    except WindowsMonitoringError as exc: raise HTTPException(409, {"code": exc.code, "message": str(exc)}) from exc
+    try:
+        provider, provider_name = await _provider(db, device)
+        values = await provider.collect_system_metrics()
+    except MonitoringProviderError as exc: raise HTTPException(409, {"code": exc.code, "message": str(exc)}) from exc
     details = {key: values.get(key) for key in ("network_interfaces", "network_adapters", "processes",
         "system_information", "events")}
     item = SystemMetricSnapshot(device_id=device_id, cpu_percent=values.get("cpu_percent"),
         memory_percent=values.get("memory_percent"), uptime_seconds=values.get("uptime_seconds"),
         storage={"disks": values.get("storage") or [], **details})
-    db.add(item); await db.commit(); await db.refresh(item)
+    db.add(item)
+    capability = (await db.execute(select(DeviceCapability).where(
+        DeviceCapability.device_id == device_id,
+        DeviceCapability.provider == provider_name))).scalar_one_or_none()
+    if capability: await evaluate_metric_alerts(db,device,values,capability.diagnostics or {})
+    await db.commit(); await db.refresh(item)
     return _metric_snapshot(item)
 
 
@@ -253,41 +259,68 @@ async def list_metrics(device_id: int, limit: int = Query(100, ge=1, le=1000), d
 async def metric_capabilities(device_id: int, db: AsyncSession = Depends(get_db)):
     device = await db.get(Device, device_id)
     if not device: raise HTTPException(404, "Device not found")
-    try: capabilities = await (await _provider(db, device)).discover_metric_capabilities()
-    except WindowsMonitoringError as exc: raise HTTPException(409, {"code": exc.code, "message": str(exc)}) from exc
+    try:
+        provider, provider_name = await _provider(db, device)
+        capabilities = await provider.discover_metric_capabilities()
+    except MonitoringProviderError as exc: raise HTTPException(409, {"code": exc.code, "message": str(exc)}) from exc
     saved = (await db.execute(select(DeviceCapability).where(DeviceCapability.device_id == device_id,
-        DeviceCapability.provider == "WINDOWS"))).scalar_one_or_none()
+        DeviceCapability.provider == provider_name))).scalar_one_or_none()
     enabled = (saved.diagnostics or {}).get("enabled_metrics", []) if saved else []
     return {"device_id": device.id, "device_name": device.name, "capabilities": capabilities,
-        "enabled_metrics": enabled}
+        "enabled_metrics": enabled,
+        "metric_thresholds": (saved.diagnostics or {}).get("metric_thresholds", {}) if saved else {},
+        "metric_notifications_enabled": (saved.diagnostics or {}).get("metric_notifications_enabled", True) if saved else True}
 
 
 @router.put("/devices/{device_id}/metrics/configuration")
 async def configure_metrics(device_id: int, payload: dict = Body(...), db: AsyncSession = Depends(get_db)):
     device = await db.get(Device, device_id)
     if not device: raise HTTPException(404, "Device not found")
-    available = await (await _provider(db, device)).discover_metric_capabilities()
+    provider, provider_name = await _provider(db, device)
+    try: available = await provider.discover_metric_capabilities()
+    except MonitoringProviderError as exc: raise HTTPException(409, {"code":exc.code,"message":str(exc)}) from exc
     selected = list(dict.fromkeys(payload.get("enabled_metrics") or []))
     invalid = [key for key in selected if key not in available or not available[key]["supported"]]
     if invalid: raise HTTPException(400, f"Unsupported metrics: {', '.join(invalid)}")
     item = (await db.execute(select(DeviceCapability).where(DeviceCapability.device_id == device_id,
-        DeviceCapability.provider == "WINDOWS"))).scalar_one_or_none()
+        DeviceCapability.provider == provider_name))).scalar_one_or_none()
     if not item:
-        item = DeviceCapability(device_id=device_id, provider="WINDOWS", platform="windows"); db.add(item)
-    item.diagnostics = {**(item.diagnostics or {}), "enabled_metrics": selected}
+        item = DeviceCapability(device_id=device_id, provider=provider_name, platform=provider_name.lower()); db.add(item)
+    thresholds = payload.get("metric_thresholds") or {}
+    clean_thresholds = {}
+    for key in ("cpu","memory","storage"):
+        policy = thresholds.get(key) or {}; warning=policy.get("warning"); critical=policy.get("critical")
+        if warning is not None and not 0 <= float(warning) <= 100: raise HTTPException(400,f"Invalid {key} warning threshold")
+        if critical is not None and not 0 <= float(critical) <= 100: raise HTTPException(400,f"Invalid {key} critical threshold")
+        if warning is not None and critical is not None and float(warning) >= float(critical):
+            raise HTTPException(400,f"{key} warning threshold must be below critical threshold")
+        clean_thresholds[key]={"enabled":bool(policy.get("enabled",True)),"warning":warning,"critical":critical}
+    item.diagnostics = {**(item.diagnostics or {}), "enabled_metrics": selected,
+        "metric_thresholds":clean_thresholds,
+        "metric_notifications_enabled":bool(payload.get("metric_notifications_enabled",True))}
     await db.commit()
     return {"device_id": device_id, "enabled_metrics": selected}
 
 
 @router.get("/metrics/overview")
 async def metrics_overview(db: AsyncSession = Depends(get_db)):
-    devices = (await db.execute(select(Device).order_by(Device.name))).scalars().all()
+    active_providers = {(item.device_id,item.provider) for item in (await db.execute(
+        select(DeviceMonitoringCredential).where(DeviceMonitoringCredential.enabled.is_(True))
+    )).scalars().all()}
+    configured = (await db.execute(select(DeviceCapability))).scalars().all()
+    active_capabilities = {item.device_id:item for item in configured
+        if (item.device_id,item.provider) in active_providers and (item.diagnostics or {}).get("enabled_metrics")}
+    active_device_ids = set(active_capabilities)
+    devices = (await db.execute(select(Device).where(Device.id.in_(active_device_ids)).order_by(Device.name))).scalars().all() if active_device_ids else []
     result = []
     for device in devices:
         latest = (await db.execute(select(SystemMetricSnapshot).where(SystemMetricSnapshot.device_id == device.id)
             .order_by(SystemMetricSnapshot.collected_at.desc()).limit(1))).scalar_one_or_none()
-        if latest: result.append({"device": {"id": device.id, "name": device.name,
-            "ip_address": device.ip_address, "status": device.status.value}, "latest": _metric_snapshot(latest)})
+        if latest:
+            snapshot = _metric_snapshot(latest)
+            snapshot["enabled_metrics"] = list((active_capabilities[device.id].diagnostics or {}).get("enabled_metrics", []))
+            result.append({"device": {"id": device.id, "name": device.name,
+                "ip_address": device.ip_address, "status": device.status.value}, "latest": snapshot})
     return result
 
 
@@ -301,7 +334,7 @@ async def operational_health(device_id: int, db: AsyncSession = Depends(get_db))
         .order_by(SystemMetricSnapshot.collected_at.desc()).limit(1))).scalar_one_or_none()
     service_state = "DOWN" if any(x.monitor_state in {"DOWN", "SUSPECTED"} for x in services) else (
         "DEGRADED" if any(x.monitor_state in {"RECOVERING", "UNKNOWN"} for x in services) else "UP")
-    return {"device_id": device_id, "availability": device.status.value, "windows_services": service_state,
+    return {"device_id": device_id, "availability": device.status.value, "services": service_state,
         "monitored_services": len(services), "cpu": latest.cpu_percent if latest else None,
         "memory": latest.memory_percent if latest else None,
         "storage": (_metric_snapshot(latest)["storage"] if latest else []),

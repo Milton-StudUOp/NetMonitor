@@ -118,7 +118,7 @@ export default function Sidebar({ user }) {
         </div>
         <div className={`sidebar-nav-group ${metricsActive?'active':''}`}>
           <button className="sidebar-nav-group-toggle" onClick={()=>setMetricsOpen(value=>!value)} aria-expanded={metricsOpen}><Gauge size={18}/><span>Metrics Monitoring</span><ChevronDown size={15} className={metricsOpen?'open':''}/></button>
-          {metricsOpen&&<div className="sidebar-nav-children"><NavLink to="/metrics-monitoring"><Gauge size={14}/>Metrics Monitoring</NavLink>{user?.role!=='VIEWER'&&<NavLink to="/metrics-discovery"><ScanSearch size={14}/>Discover Windows Metrics</NavLink>}</div>}
+          {metricsOpen&&<div className="sidebar-nav-children"><NavLink to="/metrics-monitoring"><Gauge size={14}/>Metrics Monitoring</NavLink>{user?.role!=='VIEWER'&&<NavLink to="/metrics-discovery"><ScanSearch size={14}/>Discovery</NavLink>}</div>}
         </div>
         {navItems.slice(1).map((item) => {
           const Icon = item.icon;

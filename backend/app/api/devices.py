@@ -11,9 +11,11 @@ from app.models.device import Device, DeviceStatus
 from app.models.link import Link, LinkPriority, LinkStatus, LinkType
 from app.models.monitoring_provider import DeviceCapability, DeviceMonitoringCredential
 from app.schemas.device import DeviceCreate, DeviceRead, DeviceUpdate, DeviceStatusRead
-from app.schemas.monitoring_provider import WindowsCapabilityRead, WindowsConnectionInput, WindowsConnectionRead
+from app.schemas.monitoring_provider import (LinuxConnectionInput, LinuxConnectionRead, WindowsCapabilityRead,
+    WindowsConnectionInput, WindowsConnectionRead)
 from app.security import decrypt_secret, encrypt_secret
 from app.services.windows_monitoring import WinRMTransport, WindowsMonitoringError, WindowsMonitoringProvider
+from app.services.linux_monitoring import LinuxMonitoringError, LinuxMonitoringProvider, SSHTransport
 
 router = APIRouter(prefix="/api/devices", tags=["Devices"])
 
@@ -189,6 +191,10 @@ async def configure_windows_monitoring(device_id: int, data: WindowsConnectionIn
     credential.authentication = data.authentication
     credential.enabled = data.enabled
     if data.password: credential.encrypted_password = encrypt_secret(data.password)
+    for other in (await db.execute(select(DeviceMonitoringCredential).where(
+            DeviceMonitoringCredential.device_id == device_id,
+            DeviceMonitoringCredential.provider != "WINDOWS"))).scalars().all():
+        other.enabled = False
     await db.commit(); await db.refresh(credential)
     return WindowsConnectionRead.model_validate(credential)
 
@@ -275,6 +281,86 @@ async def test_windows_monitoring_candidate(device_id: int, data: WindowsConnect
             connectivity=exc.code not in {"WINRM_UNAVAILABLE", "CHECK_TIMEOUT"}, winrm=False,
             authentication=exc.code not in {"AUTHENTICATION_FAILED", "WINRM_UNAVAILABLE", "CHECK_TIMEOUT"},
             service_discovery=False, status="FAILED", error_code=exc.code, message=str(exc), discovered_at=now)
+
+
+@router.get("/{device_id}/linux-monitoring", response_model=LinuxConnectionRead | None)
+async def get_linux_monitoring(device_id: int, db: AsyncSession = Depends(get_db)):
+    if not await db.get(Device, device_id): raise HTTPException(404, "Device not found")
+    credential = (await db.execute(select(DeviceMonitoringCredential).where(
+        DeviceMonitoringCredential.device_id == device_id,
+        DeviceMonitoringCredential.provider == "LINUX"))).scalar_one_or_none()
+    if not credential: return None
+    capability = (await db.execute(select(DeviceCapability).where(
+        DeviceCapability.device_id == device_id, DeviceCapability.provider == "LINUX"))).scalar_one_or_none()
+    return LinuxConnectionRead(username=credential.username, port=credential.port,
+        authentication=credential.authentication, verify_host_key=credential.verify_certificate,
+        enabled=credential.enabled, secret_configured=bool(credential.encrypted_password),
+        host_key=(capability.diagnostics or {}).get("host_key") if capability else None)
+
+
+@router.put("/{device_id}/linux-monitoring", response_model=LinuxConnectionRead)
+async def configure_linux_monitoring(device_id: int, data: LinuxConnectionInput,
+                                     db: AsyncSession = Depends(get_db)):
+    if not await db.get(Device, device_id): raise HTTPException(404, "Device not found")
+    if data.verify_host_key and not data.host_key:
+        raise HTTPException(400, "A verified SSH host key is required")
+    credential = (await db.execute(select(DeviceMonitoringCredential).where(
+        DeviceMonitoringCredential.device_id == device_id,
+        DeviceMonitoringCredential.provider == "LINUX"))).scalar_one_or_none()
+    if not credential:
+        if not data.secret: raise HTTPException(400, "Password or private key is required for the first configuration")
+        credential = DeviceMonitoringCredential(device_id=device_id, provider="LINUX", username=data.username,
+            encrypted_password=encrypt_secret(data.secret)); db.add(credential)
+    credential.username=data.username; credential.port=data.port; credential.use_https=False
+    credential.verify_certificate=data.verify_host_key; credential.authentication=data.authentication
+    credential.enabled=data.enabled
+    if data.secret: credential.encrypted_password=encrypt_secret(data.secret)
+    capability = (await db.execute(select(DeviceCapability).where(
+        DeviceCapability.device_id == device_id, DeviceCapability.provider == "LINUX"))).scalar_one_or_none()
+    if not capability:
+        capability=DeviceCapability(device_id=device_id,provider="LINUX",platform="linux"); db.add(capability)
+    capability.diagnostics={**(capability.diagnostics or {}),"host_key":data.host_key}
+    capability.last_status="READY"; capability.discovered_at=datetime.now(timezone.utc)
+    for other in (await db.execute(select(DeviceMonitoringCredential).where(
+            DeviceMonitoringCredential.device_id == device_id,
+            DeviceMonitoringCredential.provider != "LINUX"))).scalars().all():
+        other.enabled=False
+    await db.commit(); await db.refresh(credential)
+    return LinuxConnectionRead(username=credential.username,port=credential.port,
+        authentication=credential.authentication,verify_host_key=credential.verify_certificate,
+        enabled=credential.enabled,secret_configured=True,host_key=data.host_key)
+
+
+@router.post("/{device_id}/linux-monitoring/test-candidate")
+async def test_linux_monitoring_candidate(device_id: int, data: LinuxConnectionInput,
+                                          db: AsyncSession = Depends(get_db)):
+    device=await db.get(Device,device_id)
+    if not device: raise HTTPException(404,"Device not found")
+    if not device.ip_address: raise HTTPException(400,"Device has no IP address")
+    if device.status != DeviceStatus.ONLINE: raise HTTPException(409,"Device must be online before remote monitoring is tested")
+    secret=data.secret
+    if not secret:
+        stored=(await db.execute(select(DeviceMonitoringCredential).where(
+            DeviceMonitoringCredential.device_id==device_id,
+            DeviceMonitoringCredential.provider=="LINUX"))).scalar_one_or_none()
+        secret=decrypt_secret(stored.encrypted_password) if stored else None
+    if not secret: raise HTTPException(400,"Password or private key is required to test this connection")
+    transport=SSHTransport(device.ip_address,data.username,secret,data.port,data.authentication,
+        data.host_key,verify_host_key=bool(data.host_key) and data.verify_host_key)
+    provider=LinuxMonitoringProvider(transport); now=datetime.now(timezone.utc)
+    try:
+        detected=await provider.detect_capabilities()
+        return {"device_id":device.id,"device_name":device.name,"connectivity":True,"ssh":True,
+            "authentication":True,"service_discovery":detected.capabilities.get("services",False),
+            "status":"READY","message":"Connection verified. Confirm the host key, then save and continue.",
+            "operating_system":detected.operating_system,"provider_mode":detected.provider_mode,
+            "capabilities":detected.capabilities,"diagnostics":detected.diagnostics,"discovered_at":now}
+    except LinuxMonitoringError as exc:
+        return {"device_id":device.id,"device_name":device.name,
+            "connectivity":exc.code not in {"SSH_UNAVAILABLE","CHECK_TIMEOUT"},"ssh":False,
+            "authentication":exc.code not in {"AUTHENTICATION_FAILED","SSH_UNAVAILABLE","CHECK_TIMEOUT"},
+            "service_discovery":False,"status":"FAILED","error_code":exc.code,"message":str(exc),
+            "diagnostics":{"host_key":transport.observed_host_key},"discovered_at":now}
 
 
 @router.put("/{device_id}", response_model=DeviceRead)

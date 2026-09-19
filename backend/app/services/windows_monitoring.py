@@ -1,13 +1,11 @@
 import asyncio
 import json
 
-from app.services.monitoring_providers import CapabilityResult, MonitoringProvider
+from app.services.monitoring_providers import CapabilityResult, MonitoringProvider, MonitoringProviderError
 
 
-class WindowsMonitoringError(RuntimeError):
-    def __init__(self, code: str, message: str):
-        self.code = code
-        super().__init__(message)
+class WindowsMonitoringError(MonitoringProviderError):
+    pass
 
 
 class WinRMTransport:
