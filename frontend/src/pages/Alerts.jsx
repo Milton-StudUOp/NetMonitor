@@ -17,6 +17,7 @@ export default function Alerts() {
   useEffect(() => { fetchAlerts(); const timer = setInterval(fetchAlerts, 15000); return () => clearInterval(timer); }, [fetchAlerts]);
   const change = event => setFilters(old => ({...old,[event.target.name]:event.target.value,page:'1'}));
   const handleResolve = async id => { await api.put(`/alerts/${id}/resolve`); fetchAlerts(); };
+  const handleAcknowledge = async id => { const note=window.prompt('Acknowledgement note (optional):'); if(note===null)return; await api.put(`/alerts/${id}/acknowledge`,{note}); fetchAlerts(); };
   const clearAll = async () => { if (window.confirm('Permanently delete every alert?')) { await api.delete('/alerts'); fetchAlerts(); } };
   const hasFilters = Object.entries(filters).some(([key,value]) => key !== 'limit' && value);
   return <div className="data-page">
@@ -32,7 +33,7 @@ export default function Alerts() {
       <div className="form-group"><label className="form-label">Maximum results</label><select name="limit" className="form-select" value={filters.limit} onChange={change}><option>50</option><option>100</option><option>250</option><option>500</option></select></div>
     </div></div>
     {error&&<div className="notice error">{error}</div>}<div className="result-summary">{loading?'Loading alerts…':`${alerts.length} alert(s) found`}</div>
-    <div className="alert-list data-grid-card">{!loading&&alerts.length===0?<div className="glass-card filtered-empty"><strong>No alerts match these filters</strong><span>Adjust or clear the filters to see more incidents.</span></div>:alerts.map(alert=><AlertBanner key={alert.id} alert={alert} onResolve={alert.is_resolved?null:handleResolve}/>)}</div>
+    <div className="alert-list data-grid-card">{!loading&&alerts.length===0?<div className="glass-card filtered-empty"><strong>No alerts match these filters</strong><span>Adjust or clear the filters to see more incidents.</span></div>:alerts.map(alert=><AlertBanner key={alert.id} alert={alert} onResolve={alert.is_resolved?null:handleResolve} onAcknowledge={handleAcknowledge}/>)}</div>
     <Pagination page={Number(filters.page)} pageSize={Number(filters.limit)} total={total} count={alerts.length} disabled={loading} onPageChange={page=>setFilters(old=>({...old,page:String(page)}))}/>
   </div>;
 }

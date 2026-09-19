@@ -20,6 +20,7 @@ class DeviceMonitoringCredential(Base):
     use_https: Mapped[bool] = mapped_column(Boolean, default=True)
     verify_certificate: Mapped[bool] = mapped_column(Boolean, default=True)
     authentication: Mapped[str] = mapped_column(String(24), default="NTLM")
+    configuration: Mapped[dict] = mapped_column(PortableJSON, default=dict)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

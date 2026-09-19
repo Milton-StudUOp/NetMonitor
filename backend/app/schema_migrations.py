@@ -1,6 +1,6 @@
 from sqlalchemy import inspect
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 5
 
 
 async def ensure_runtime_schema(engine) -> None:
@@ -97,6 +97,24 @@ async def ensure_runtime_schema(engine) -> None:
             await conn.exec_driver_sql(_add_column_sql(dialect, "devices", "icon_id", "INTEGER"))
         if "monitoring_method" not in device_columns:
             await conn.exec_driver_sql(_add_column_sql(dialect, "devices", "monitoring_method", "VARCHAR(24) DEFAULT 'ICMP'"))
+
+        alert_columns = await conn.run_sync(
+            lambda sync_conn: {col["name"] for col in inspect(sync_conn).get_columns("alerts")}
+        )
+        if "acknowledged_at" not in alert_columns:
+            acknowledged_at_type = "DATETIME2 NULL" if dialect == "mssql" else "TIMESTAMP NULL"
+            await conn.exec_driver_sql(_add_column_sql(dialect, "alerts", "acknowledged_at", acknowledged_at_type))
+        if "acknowledged_by_user_id" not in alert_columns:
+            await conn.exec_driver_sql(_add_column_sql(dialect, "alerts", "acknowledged_by_user_id", "INTEGER NULL"))
+        if "acknowledgement_note" not in alert_columns:
+            await conn.exec_driver_sql(_add_column_sql(dialect, "alerts", "acknowledgement_note", "TEXT NULL"))
+
+        credential_columns = await conn.run_sync(
+            lambda sync_conn: {col["name"] for col in inspect(sync_conn).get_columns("device_monitoring_credentials")}
+        )
+        if "configuration" not in credential_columns:
+            json_type = "JSONB" if dialect == "postgresql" else "TEXT"
+            await conn.exec_driver_sql(_add_column_sql(dialect, "device_monitoring_credentials", "configuration", json_type))
 
         redundancy_columns = await conn.run_sync(
             lambda sync_conn: inspect(sync_conn).get_columns("redundancy_groups")

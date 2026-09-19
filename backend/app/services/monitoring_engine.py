@@ -198,10 +198,7 @@ class MonitoringEngine:
             ping_res = await ping_target(device.ip_address, count=2)
             self._latest_device_probes[device.id] = ping_res
             is_up = ping_res["is_up"]
-            dependency_down, dependency_reason = await self._detect_downstream_dependency(
-                device,
-                gateway_ping_cache,
-            )
+            dependency_down, dependency_reason = await self._detect_downstream_dependency(device, gateway_ping_cache)
             initial_state = "UP" if device.status == DeviceStatus.ONLINE else "DOWN" if device.status == DeviceStatus.OFFLINE else "UNKNOWN"
             stable_state, _ = state_tracker.update("DEVICE", device.id, is_up, initial_state)
             new_status = DeviceStatus.ONLINE if stable_state == "UP" else (

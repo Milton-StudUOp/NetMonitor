@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from ipaddress import ip_address
+import json
 import os
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -12,16 +13,29 @@ from app.models.link import Link, LinkPriority, LinkStatus, LinkType
 from app.models.monitoring_provider import DeviceCapability, DeviceMonitoringCredential
 from app.schemas.device import DeviceCreate, DeviceRead, DeviceUpdate, DeviceStatusRead
 from app.schemas.monitoring_provider import (LinuxConnectionInput, LinuxConnectionRead, WindowsCapabilityRead,
-    WindowsConnectionInput, WindowsConnectionRead)
+    SNMPCapabilityRead, SNMPConnectionInput, SNMPConnectionRead, WindowsConnectionInput, WindowsConnectionRead)
 from app.security import decrypt_secret, encrypt_secret
 from app.services.windows_monitoring import WinRMTransport, WindowsMonitoringError, WindowsMonitoringProvider
 from app.services.linux_monitoring import LinuxMonitoringError, LinuxMonitoringProvider, SSHTransport
+from app.services.snmp_monitoring import SNMPMonitoringError, SNMPMonitoringProvider, SNMPSecurity, SNMPTransport
 
 router = APIRouter(prefix="/api/devices", tags=["Devices"])
 
 AUTO_GATEWAY_LINK_DESCRIPTION = (
     "Enlace principal criado automaticamente a partir do equipamento gateway."
 )
+
+
+async def _assert_provider_can_be_enabled(db: AsyncSession, device_id: int, provider: str) -> None:
+    active = (await db.execute(select(DeviceMonitoringCredential.provider).where(
+        DeviceMonitoringCredential.device_id == device_id,
+        DeviceMonitoringCredential.enabled.is_(True),
+        DeviceMonitoringCredential.provider != provider,
+    ))).scalars().first()
+    if active:
+        raise HTTPException(409, detail=(
+            f"{active.title()} monitoring is currently linked. Unlink the active integration before configuring {provider.title()}."
+        ))
 
 
 def _reject_loopback_windows_target(device: Device) -> None:
@@ -175,6 +189,7 @@ async def configure_windows_monitoring(device_id: int, data: WindowsConnectionIn
                                        db: AsyncSession = Depends(get_db)):
     if not await db.get(Device, device_id):
         raise HTTPException(status_code=404, detail="Device not found")
+    if data.enabled: await _assert_provider_can_be_enabled(db, device_id, "WINDOWS")
     credential = (await db.execute(select(DeviceMonitoringCredential).where(
         DeviceMonitoringCredential.device_id == device_id,
         DeviceMonitoringCredential.provider == "WINDOWS"))).scalar_one_or_none()
@@ -191,10 +206,6 @@ async def configure_windows_monitoring(device_id: int, data: WindowsConnectionIn
     credential.authentication = data.authentication
     credential.enabled = data.enabled
     if data.password: credential.encrypted_password = encrypt_secret(data.password)
-    for other in (await db.execute(select(DeviceMonitoringCredential).where(
-            DeviceMonitoringCredential.device_id == device_id,
-            DeviceMonitoringCredential.provider != "WINDOWS"))).scalars().all():
-        other.enabled = False
     await db.commit(); await db.refresh(credential)
     return WindowsConnectionRead.model_validate(credential)
 
@@ -302,6 +313,7 @@ async def get_linux_monitoring(device_id: int, db: AsyncSession = Depends(get_db
 async def configure_linux_monitoring(device_id: int, data: LinuxConnectionInput,
                                      db: AsyncSession = Depends(get_db)):
     if not await db.get(Device, device_id): raise HTTPException(404, "Device not found")
+    if data.enabled: await _assert_provider_can_be_enabled(db, device_id, "LINUX")
     if data.verify_host_key and not data.host_key:
         raise HTTPException(400, "A verified SSH host key is required")
     credential = (await db.execute(select(DeviceMonitoringCredential).where(
@@ -321,10 +333,6 @@ async def configure_linux_monitoring(device_id: int, data: LinuxConnectionInput,
         capability=DeviceCapability(device_id=device_id,provider="LINUX",platform="linux"); db.add(capability)
     capability.diagnostics={**(capability.diagnostics or {}),"host_key":data.host_key}
     capability.last_status="READY"; capability.discovered_at=datetime.now(timezone.utc)
-    for other in (await db.execute(select(DeviceMonitoringCredential).where(
-            DeviceMonitoringCredential.device_id == device_id,
-            DeviceMonitoringCredential.provider != "LINUX"))).scalars().all():
-        other.enabled=False
     await db.commit(); await db.refresh(credential)
     return LinuxConnectionRead(username=credential.username,port=credential.port,
         authentication=credential.authentication,verify_host_key=credential.verify_certificate,
@@ -361,6 +369,160 @@ async def test_linux_monitoring_candidate(device_id: int, data: LinuxConnectionI
             "authentication":exc.code not in {"AUTHENTICATION_FAILED","SSH_UNAVAILABLE","CHECK_TIMEOUT"},
             "service_discovery":False,"status":"FAILED","error_code":exc.code,"message":str(exc),
             "diagnostics":{"host_key":transport.observed_host_key},"discovered_at":now}
+
+
+def _snmp_read(credential: DeviceMonitoringCredential) -> SNMPConnectionRead:
+    config = credential.configuration or {}
+    return SNMPConnectionRead(version=config.get("version", "2c"), username=credential.username or None,
+        port=credential.port, enabled=credential.enabled, secret_configured=bool(credential.encrypted_password),
+        privacy_configured=bool(config.get("privacy_configured")))
+
+
+def _decode_snmp_secret(credential: DeviceMonitoringCredential | None) -> dict:
+    if not credential or not credential.encrypted_password:
+        return {}
+    value = decrypt_secret(credential.encrypted_password)
+    if not value:
+        return {}
+    try:
+        parsed = json.loads(value)
+        return parsed if isinstance(parsed, dict) else {}
+    except ValueError:
+        return {"community": value}
+
+
+def _snmp_secret_payload(data: SNMPConnectionInput, existing: dict | None = None) -> dict:
+    existing = existing or {}
+    if data.version == "3":
+        return {"auth_key": data.auth_key or existing.get("auth_key"), "priv_key": data.priv_key or existing.get("priv_key")}
+    return {"community": data.community or existing.get("community")}
+
+
+def _snmp_security(data: SNMPConnectionInput, secrets: dict) -> SNMPSecurity:
+    return SNMPSecurity(version=data.version, community=secrets.get("community") if data.version != "3" else None,
+        username=data.username, auth_key=secrets.get("auth_key") if data.version == "3" else None,
+        priv_key=secrets.get("priv_key"), auth_protocol=data.auth_protocol, priv_protocol=data.priv_protocol)
+
+
+@router.get("/{device_id}/snmp-monitoring", response_model=SNMPConnectionRead | None)
+async def get_snmp_monitoring(device_id: int, db: AsyncSession = Depends(get_db)):
+    if not await db.get(Device, device_id): raise HTTPException(404, "Device not found")
+    credential = (await db.execute(select(DeviceMonitoringCredential).where(
+        DeviceMonitoringCredential.device_id == device_id,
+        DeviceMonitoringCredential.provider == "SNMP"))).scalar_one_or_none()
+    return _snmp_read(credential) if credential else None
+
+
+@router.put("/{device_id}/snmp-monitoring", response_model=SNMPConnectionRead)
+async def configure_snmp_monitoring(device_id: int, data: SNMPConnectionInput,
+                                    db: AsyncSession = Depends(get_db)):
+    if not await db.get(Device, device_id): raise HTTPException(404, "Device not found")
+    if data.enabled: await _assert_provider_can_be_enabled(db, device_id, "SNMP")
+    if data.version == "3" and not data.username:
+        raise HTTPException(400, "SNMPv3 username is required")
+    credential = (await db.execute(select(DeviceMonitoringCredential).where(
+        DeviceMonitoringCredential.device_id == device_id,
+        DeviceMonitoringCredential.provider == "SNMP"))).scalar_one_or_none()
+    existing_secrets = _decode_snmp_secret(credential)
+    secrets = _snmp_secret_payload(data, existing_secrets)
+    secret = secrets.get("auth_key") if data.version == "3" else secrets.get("community")
+    if not credential:
+        if not secret: raise HTTPException(400, "SNMP secret is required for the first configuration")
+        credential = DeviceMonitoringCredential(device_id=device_id, provider="SNMP",
+            username=data.username or "", encrypted_password=encrypt_secret(secret), port=data.port)
+        db.add(credential)
+    credential.username = data.username or ""
+    credential.port = data.port
+    credential.use_https = False
+    credential.verify_certificate = False
+    credential.authentication = "SNMP_V3" if data.version == "3" else "COMMUNITY"
+    credential.enabled = data.enabled
+    if secret: credential.encrypted_password = encrypt_secret(json.dumps(secrets))
+    credential.configuration = {"version": data.version, "auth_protocol": data.auth_protocol,
+        "priv_protocol": data.priv_protocol, "privacy_configured": bool(secrets.get("priv_key"))}
+    capability = (await db.execute(select(DeviceCapability).where(
+        DeviceCapability.device_id == device_id, DeviceCapability.provider == "SNMP"))).scalar_one_or_none()
+    if not capability:
+        capability = DeviceCapability(device_id=device_id, provider="SNMP", platform="snmp")
+        db.add(capability)
+    capability.last_status = "UNTESTED"
+    capability.discovered_at = datetime.now(timezone.utc)
+    await db.commit(); await db.refresh(credential)
+    return _snmp_read(credential)
+
+
+@router.delete("/{device_id}/monitoring-integration")
+async def unlink_monitoring_integration(device_id: int, db: AsyncSession = Depends(get_db)):
+    if not await db.get(Device, device_id): raise HTTPException(404, "Device not found")
+    credentials = (await db.execute(select(DeviceMonitoringCredential).where(
+        DeviceMonitoringCredential.device_id == device_id,
+        DeviceMonitoringCredential.enabled.is_(True)))).scalars().all()
+    if not credentials: raise HTTPException(409, "No active monitoring integration to unlink")
+    for credential in credentials: credential.enabled = False
+    await db.commit()
+    return {"unlinked": [credential.provider for credential in credentials]}
+
+
+async def _test_snmp_connection(device: Device, data: SNMPConnectionInput, secrets: dict) -> SNMPCapabilityRead:
+    if not (secrets.get("auth_key") if data.version == "3" else secrets.get("community")):
+        raise HTTPException(400, "SNMP secret is required to test this connection")
+    provider = SNMPMonitoringProvider(SNMPTransport(device.ip_address, _snmp_security(data, secrets), data.port))
+    now = datetime.now(timezone.utc)
+    try:
+        detected = await provider.detect_capabilities()
+        return SNMPCapabilityRead(device_id=device.id, device_name=device.name, connectivity=True, snmp=True,
+            authentication=True, status="READY", message="SNMP agent verified.",
+            operating_system=detected.operating_system, provider_mode=detected.provider_mode,
+            capabilities=detected.capabilities, diagnostics=detected.diagnostics, discovered_at=now)
+    except SNMPMonitoringError as exc:
+        return SNMPCapabilityRead(device_id=device.id, device_name=device.name,
+            connectivity=exc.code not in {"SNMP_UNAVAILABLE", "SNMP_QUERY_FAILED", "SNMP_WALK_FAILED"},
+            snmp=False, authentication=exc.code not in {"SNMP_AUTHENTICATION_FAILED"},
+            status="FAILED", error_code=exc.code, message=str(exc), discovered_at=now)
+
+
+@router.post("/{device_id}/snmp-monitoring/test-candidate", response_model=SNMPCapabilityRead)
+async def test_snmp_monitoring_candidate(device_id: int, data: SNMPConnectionInput,
+                                         db: AsyncSession = Depends(get_db)):
+    device = await db.get(Device, device_id)
+    if not device: raise HTTPException(404, "Device not found")
+    if not device.ip_address: raise HTTPException(400, "Device has no IP address")
+    if device.status != DeviceStatus.ONLINE: raise HTTPException(409, "Device must be online before remote monitoring is tested")
+    stored = (await db.execute(select(DeviceMonitoringCredential).where(
+        DeviceMonitoringCredential.device_id == device_id,
+        DeviceMonitoringCredential.provider == "SNMP"))).scalar_one_or_none()
+    return await _test_snmp_connection(device, data, _snmp_secret_payload(data, _decode_snmp_secret(stored)))
+
+
+@router.post("/{device_id}/snmp-monitoring/test", response_model=SNMPCapabilityRead)
+async def test_snmp_monitoring(device_id: int, db: AsyncSession = Depends(get_db)):
+    device = await db.get(Device, device_id)
+    if not device: raise HTTPException(404, "Device not found")
+    if not device.ip_address: raise HTTPException(400, "Device has no IP address")
+    if device.status != DeviceStatus.ONLINE: raise HTTPException(409, "Device must be online before remote monitoring is tested")
+    credential = (await db.execute(select(DeviceMonitoringCredential).where(
+        DeviceMonitoringCredential.device_id == device_id,
+        DeviceMonitoringCredential.provider == "SNMP",
+        DeviceMonitoringCredential.enabled.is_(True)))).scalar_one_or_none()
+    if not credential: raise HTTPException(400, "Configure SNMP monitoring first")
+    config = credential.configuration or {}
+    data = SNMPConnectionInput(version=config.get("version", "2c"), username=credential.username or None,
+        auth_protocol=config.get("auth_protocol", "SHA"), priv_protocol=config.get("priv_protocol", "AES"),
+        port=credential.port, enabled=credential.enabled)
+    capability = (await db.execute(select(DeviceCapability).where(
+        DeviceCapability.device_id == device_id, DeviceCapability.provider == "SNMP"))).scalar_one_or_none()
+    if not capability:
+        capability = DeviceCapability(device_id=device_id, provider="SNMP", platform="snmp"); db.add(capability)
+    result = await _test_snmp_connection(device, data, _decode_snmp_secret(credential))
+    capability.provider_mode = result.provider_mode or "SNMP"
+    capability.operating_system = result.operating_system
+    capability.capabilities = result.capabilities
+    capability.diagnostics = result.diagnostics
+    capability.last_status = result.status
+    capability.last_error_code = result.error_code
+    capability.discovered_at = result.discovered_at
+    await db.commit()
+    return result
 
 
 @router.put("/{device_id}", response_model=DeviceRead)

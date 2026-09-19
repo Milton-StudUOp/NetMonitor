@@ -45,6 +45,27 @@ class LinuxConnectionRead(BaseModel):
     host_key: str | None = None
 
 
+class SNMPConnectionInput(BaseModel):
+    version: Literal["1", "2c", "3"] = "2c"
+    community: str | None = Field(default=None, max_length=256)
+    username: str | None = Field(default=None, max_length=256)
+    auth_key: str | None = Field(default=None, max_length=1024)
+    priv_key: str | None = Field(default=None, max_length=1024)
+    auth_protocol: Literal["NONE", "MD5", "SHA"] = "SHA"
+    priv_protocol: Literal["NONE", "DES", "AES"] = "AES"
+    port: int = Field(default=161, ge=1, le=65535)
+    enabled: bool = True
+
+
+class SNMPConnectionRead(BaseModel):
+    version: str
+    username: str | None = None
+    port: int
+    enabled: bool
+    secret_configured: bool = True
+    privacy_configured: bool = False
+
+
 class WindowsCapabilityRead(BaseModel):
     device_id: int
     device_name: str
@@ -57,6 +78,23 @@ class WindowsCapabilityRead(BaseModel):
     message: str
     operating_system: str | None = None
     powershell_version: str | None = None
+    provider_mode: str | None = None
+    capabilities: dict = Field(default_factory=dict)
+    diagnostics: dict = Field(default_factory=dict)
+    discovered_at: datetime | None = None
+
+
+class SNMPCapabilityRead(BaseModel):
+    device_id: int
+    device_name: str
+    connectivity: bool
+    snmp: bool
+    authentication: bool
+    service_discovery: bool = False
+    status: str
+    error_code: str | None = None
+    message: str
+    operating_system: str | None = None
     provider_mode: str | None = None
     capabilities: dict = Field(default_factory=dict)
     diagnostics: dict = Field(default_factory=dict)

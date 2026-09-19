@@ -21,8 +21,9 @@ Service operations are a dedicated module in the main navigation:
 
 - **Service Monitoring** is the operational dashboard for health, coverage, failures,
   and recent checks.
-- **Discovery** is a four-step assistant: choose device, test connection,
-  discover, then select and configure monitoring.
+- **Discovery** is a guided assistant: choose a device, configure or validate the
+  provider, discover, then select and configure monitoring. Connection testing is
+  recommended but a known-good configuration can be saved without a successful test.
 - **Topology** is a separate full-screen-capable device-to-service map.
 
 The three pages are grouped under one expandable **Services Monitoring** navigation
@@ -36,7 +37,8 @@ These workflows are deliberately kept out of the device metrics/analytics page.
 The assistant does not assume that only devices registered as `SERVER` can expose
 Windows services. Any online registered device with an IP address can be selected;
 the non-persistent connection test determines the actual platform and capabilities.
-Credentials and connection settings are saved only after that test returns `READY`.
+The active provider is displayed before discovery. A device can have only one active
+monitoring provider at a time; unlink the current provider before replacing it.
 
 ## Security
 

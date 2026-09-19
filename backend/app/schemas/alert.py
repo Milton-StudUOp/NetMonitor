@@ -25,6 +25,13 @@ class AlertRead(AlertBase):
 
     id: int
     is_resolved: bool
+    acknowledged_at: Optional[datetime] = None
+    acknowledged_by_user_id: Optional[int] = None
+    acknowledgement_note: Optional[str] = None
     notified_channels: Optional[List[str]] = None
     created_at: datetime
     resolved_at: Optional[datetime] = None
+
+
+class AlertAcknowledge(BaseModel):
+    note: str | None = None

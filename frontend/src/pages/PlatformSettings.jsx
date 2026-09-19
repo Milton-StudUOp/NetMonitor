@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Bell, Database, Download, Image, Plus, Save, Settings, TestTube, Trash2, Upload, Users } from 'lucide-react';
+import { Bell, Database, Download, Image, Plus, Save, Settings, TestTube, Trash2, Upload, Users, Layers3 } from 'lucide-react';
 import api from '../api/client';
 import { getApiErrorMessage } from '../utils/errors';
 import NotificationSettings from '../components/NotificationSettings';
@@ -11,7 +11,7 @@ const databaseDefaultPorts = { POSTGRESQL: 5432, MYSQL: 3306, MSSQL: 1433, ORACL
 export default function PlatformSettings() {
   const [tab, setTab] = useState('databases');
   const [notice, setNotice] = useState(null);
-  const tabs = [['databases', Database, 'Databases'], ['notifications', Bell, 'Notifications'], ['users', Users, 'Users'], ['icons', Image, 'Icons'], ['general', Settings, 'System & Backup']];
+  const tabs = [['databases', Database, 'Databases'], ['notifications', Bell, 'Notifications'], ['profiles', Layers3, 'Profiles'], ['users', Users, 'Users'], ['icons', Image, 'Icons'], ['general', Settings, 'System & Backup']];
   const report = (type, text) => setNotice({ type, text });
   return <div>
     <div className="page-title"><div><h2>Configuration and Integrations</h2><p>Persistent settings, protected credentials, and controlled tests.</p></div></div>
@@ -19,6 +19,7 @@ export default function PlatformSettings() {
     {notice && <div className={`notice ${notice.type}`}>{notice.text}</div>}
     {tab === 'databases' && <Databases report={report} />}
     {tab === 'notifications' && <NotificationSettings report={report} />}
+    {tab === 'profiles' && <MonitoringProfiles report={report} />}
     {tab === 'users' && <AccountUsers report={report} />}
     {tab === 'icons' && <Icons report={report} />}
     {tab === 'general' && <General report={report} />}
@@ -207,6 +208,19 @@ function Databases({ report }) {
       </div>
     </div>
   </>;
+}
+
+function MonitoringProfiles({ report }) {
+  const blank={name:'',description:'',service_patterns:'',enabled:true,check_interval:60,recovery_threshold:2,severity:'CRITICAL',notifications_enabled:true};
+  const [items,setItems]=useState([]); const [devices,setDevices]=useState([]); const [form,setForm]=useState(blank); const [editing,setEditing]=useState(null); const [selected,setSelected]=useState([]); const [busy,setBusy]=useState(false);
+  const load=async()=>{try{const [profiles,deviceRows]=await Promise.all([api.get('/monitoring-profiles'),api.get('/devices')]);setItems(profiles.data);setDevices(deviceRows.data);}catch(error){report('error',getApiErrorMessage(error));}};
+  useEffect(()=>{load();},[]);
+  const payload=()=>({name:form.name,description:form.description||null,service_patterns:form.service_patterns.split(',').map(value=>value.trim()).filter(Boolean),metric_config:{},defaults:{expected_state:'running',check_interval:Number(form.check_interval),failure_threshold:1,recovery_threshold:Number(form.recovery_threshold),severity:form.severity,notifications_enabled:form.notifications_enabled},enabled:form.enabled});
+  const save=async event=>{event.preventDefault();setBusy(true);try{if(editing)await api.put(`/monitoring-profiles/${editing}`,payload());else await api.post('/monitoring-profiles',payload());setForm(blank);setEditing(null);report('success','Monitoring profile saved.');await load();}catch(error){report('error',getApiErrorMessage(error));}finally{setBusy(false);}};
+  const edit=item=>{setEditing(item.id);const defaults=item.defaults||{};setForm({name:item.name,description:item.description||'',service_patterns:(item.service_patterns||[]).join(', '),enabled:item.enabled,check_interval:defaults.check_interval||60,recovery_threshold:defaults.recovery_threshold||2,severity:defaults.severity||'CRITICAL',notifications_enabled:defaults.notifications_enabled!==false});};
+  const remove=async item=>{if(!window.confirm(`Delete monitoring profile "${item.name}"?`))return;try{await api.delete(`/monitoring-profiles/${item.id}`);report('success','Monitoring profile deleted.');await load();}catch(error){report('error',getApiErrorMessage(error));}};
+  const apply=async item=>{if(!selected.length){report('error','Select one or more devices before applying a profile.');return;}setBusy(true);try{const {data}=await api.post(`/monitoring-profiles/${item.id}/apply`,{device_ids:selected});report('success',`${data.profile} applied to ${data.devices} device(s).`);}catch(error){report('error',getApiErrorMessage(error));}finally{setBusy(false);}};
+  return <div className="settings-grid"><form className="glass-card settings-panel" onSubmit={save}><div className="panel-heading"><div><h3>{editing?'Edit monitoring profile':'New monitoring profile'}</h3><p className="muted">Apply consistent service defaults to one or more devices.</p></div></div><Field label="Name"><input className="form-input" required value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></Field><Field label="Description"><input className="form-input" value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></Field><Field label="Service name patterns"><input className="form-input" placeholder="nginx*, sshd, WinRM" value={form.service_patterns} onChange={e=>setForm({...form,service_patterns:e.target.value})}/></Field><div className="form-row"><Field label="Interval (seconds)"><input className="form-input" type="number" min="30" value={form.check_interval} onChange={e=>setForm({...form,check_interval:e.target.value})}/></Field><Field label="Recoveries"><input className="form-input" type="number" min="1" value={form.recovery_threshold} onChange={e=>setForm({...form,recovery_threshold:e.target.value})}/></Field></div><Field label="Severity"><select className="form-select" value={form.severity} onChange={e=>setForm({...form,severity:e.target.value})}><option>INFORMATION</option><option>WARNING</option><option>CRITICAL</option></select></Field><label className="check-line"><input type="checkbox" checked={form.notifications_enabled} onChange={e=>setForm({...form,notifications_enabled:e.target.checked})}/>Enable notifications</label><div className="row-actions"><button type="button" className="btn btn-secondary" onClick={()=>{setEditing(null);setForm(blank)}}>Clear</button><button className="btn btn-primary" disabled={busy}><Save size={15}/>{editing?'Update Profile':'Save Profile'}</button></div></form><section className="glass-card settings-panel"><h3>Apply a profile</h3><p className="muted">Select devices, then apply a saved profile. Only matching discovered services are added.</p><select className="form-select" multiple size="7" value={selected} onChange={e=>setSelected([...e.target.selectedOptions].map(option=>Number(option.value)))}>{devices.map(device=><option key={device.id} value={device.id}>{device.name} · {device.ip_address||'No IP'}</option>)}</select><div className="entity-list">{items.map(item=><article className="entity-row" key={item.id}><div><strong>{item.name}</strong><span>{(item.service_patterns||[]).join(', ')||'No service patterns'}</span><small>{item.enabled?'Active':'Inactive'} · {(item.defaults||{}).check_interval||60}s interval</small></div><div className="row-actions"><button className="btn btn-primary" disabled={busy||!item.enabled} onClick={()=>apply(item)}>Apply</button><button className="btn btn-secondary" onClick={()=>edit(item)}>Edit</button><button className="icon-button danger" onClick={()=>remove(item)}><Trash2 size={15}/></button></div></article>)}{!items.length&&<p className="muted">No monitoring profiles configured.</p>}</div></section></div>;
 }
 
 

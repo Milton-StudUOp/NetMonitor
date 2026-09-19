@@ -14,11 +14,12 @@ Active development is performed on the `dev` branch. Use `main` only for stable 
 - Automatic or free-form topology with positions persisted in the backend.
 - Separate network and service topologies with private saved views, viewport auto-save, zoom, pan, minimap, and fullscreen mode.
 - Windows service discovery through WinRM, explicit selection for monitoring, immediate DOWN classification, recovery confirmation, history, alerts, and analytics.
-- Capability-based Windows metrics for CPU, memory, uptime, storage, interfaces, processes, system information, and events where supported.
+- Linux systemd service and metrics monitoring through SSH where the host capabilities allow it.
+- Capability-based Windows, Linux, and SNMP metrics. Providers return only supported capabilities; SNMP supports selected-interface inventory, counters, calculated traffic, and utilization after two samples.
 - Light, dark, and operating-system theme modes persisted in the browser.
 - Built-in icon library and sanitized SVG/PNG uploads.
 - Redundancy through links or directly between devices.
-- Normal, degraded, and critical states with dependency diagnostics.
+- Normal, degraded, and critical states with link, gateway, and redundancy diagnostics.
 - SMTP email, Telegram, and WhatsApp through an official API/provider or an optional isolated WhatsApp Web bridge.
 - Rules, deduplication, reminders, and recovery notifications.
 - SQLite by default, with SQLite, PostgreSQL, MySQL, SQL Server, or Oracle promotion to the primary database.
@@ -197,11 +198,11 @@ The **Services Monitoring** navigation group contains:
 - **Service Monitoring** — only services explicitly added to monitoring, with operational filters and per-service configuration.
 - **Discovery** — select a registered device, test its remote-management connection, discover services, and add selected services with safe defaults.
 
-The **Metrics Monitoring** group separates metric discovery from continuous monitoring. Capability discovery returns only features supported by the target Windows host. Enabled CPU, memory, uptime, storage, interface, process, system-information, and event data is normalized before storage and display. Device reachability and service/resource health remain separate concepts.
+The **Metrics Monitoring** group separates metric discovery from continuous monitoring. Capability discovery returns only features supported by the selected Windows, Linux, or SNMP provider. Enabled CPU, memory, uptime, storage, interface, process, system-information, and event data is normalized before storage and display. Unsupported or disabled categories show `Not monitored` or `Awaiting data`, never synthetic zero values. Device reachability and service/resource health remain separate concepts.
 
-Windows service state changes use `UP → DOWN → RECOVERING → UP`. A confirmed service-state mismatch becomes `DOWN` immediately; recovery requires the configured successful checks. WinRM, authentication, permission, and timeout failures remain communication errors and never become false `SERVICE_DOWN` incidents.
+Service state changes use `UP -> DOWN -> RECOVERING -> UP`. A confirmed service-state mismatch becomes `DOWN` immediately; the service workflow does not use `SUSPECTED`. Recovery requires the configured successful checks. WinRM, SSH, authentication, permission, and timeout failures remain communication errors and never become false service-down incidents.
 
-See [Windows monitoring](docs/WINDOWS_MONITORING.md). Linux services and metrics are the next planned provider; see [implementation roadmap](improvement.md).
+See [Windows monitoring](docs/WINDOWS_MONITORING.md) and the complete [functional guide](netmonitor.md). Current delivery status and the next operational improvements are tracked in the [implementation roadmap](improvement.md).
 
 ## Operational filters and exports
 

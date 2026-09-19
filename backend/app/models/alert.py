@@ -27,6 +27,11 @@ class Alert(Base):
         Integer, ForeignKey("redundancy_groups.id"), nullable=True, index=True
     )
     is_resolved: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    acknowledged_by_user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("user_accounts.id"), nullable=True, index=True
+    )
+    acknowledgement_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     root_cause: Mapped[str | None] = mapped_column(Text, nullable=True)
     notified_channels: Mapped[list | None] = mapped_column(PortableJSON, nullable=True, default=list)
     created_at: Mapped[datetime] = mapped_column(

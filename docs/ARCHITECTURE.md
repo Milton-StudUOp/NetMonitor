@@ -63,7 +63,7 @@ The monitoring probe loop and retention maintenance run as separate asynchronous
 
 The alert engine deduplicates by target while an alert remains active. Rules define the event, severity, channels, recipients, reminder, and recovery behavior. `notification_deliveries` records the latest delivery and count to prevent continuous repetition.
 
-Severity is based on operational impact, not on the optional device importance flag. After the state machine confirms the configured number of failed probes, every device transition to `OFFLINE` creates a `CRITICAL` incident. A dependency-affected or otherwise degraded state creates a `WARNING`; degraded redundancy is also `WARNING`, while complete redundancy loss is `CRITICAL`. Recovery is informational and resolves the active incident.
+Severity is based on operational impact, not on the optional device importance flag. After the state machine confirms the configured number of failed probes, every device transition to `OFFLINE` creates a `CRITICAL` incident. A degraded link, gateway condition, or degraded redundancy creates a `WARNING`, while complete redundancy loss is `CRITICAL`. Recovery is informational and resolves the active incident.
 
 Rule severity is a minimum threshold: `INFORMATION` matches all severities, `WARNING` matches warning and critical events, and `CRITICAL` matches critical events only. This permits one escalation rule to cover failures without duplicating channel configuration.
 

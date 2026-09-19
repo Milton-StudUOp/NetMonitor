@@ -13,6 +13,7 @@ from app.models.monitoring_provider import (DeviceCapability, DeviceMonitoringCr
 from app.services.monitoring_providers import MonitoringProviderError
 from app.services.provider_factory import provider_for_device
 from app.services.metric_alerts import evaluate_metric_alerts
+from app.services.interface_metrics import enrich_interface_rates, selected_interfaces
 from app.services.notification.dispatcher import dispatch_persisted_notifications
 
 logger = structlog.get_logger()
@@ -86,6 +87,15 @@ class WindowsMonitoringEngine:
                 if enabled_metrics and (not last_metric or now - last_metric >= timedelta(seconds=60)):
                     values = await provider.collect_system_metrics()
                     allowed = set(enabled_metrics)
+                    previous = (await db.execute(select(SystemMetricSnapshot).where(
+                        SystemMetricSnapshot.device_id == device_id).order_by(
+                        SystemMetricSnapshot.collected_at.desc()).limit(1))).scalar_one_or_none()
+                    raw_interfaces = selected_interfaces(values.get("network_interfaces"),
+                        (capability.diagnostics or {}).get("selected_interface_indexes"))
+                    values["network_interfaces"] = enrich_interface_rates(raw_interfaces,
+                        ((previous.storage or {}).get("network_interfaces") if previous else []), now,
+                        previous.collected_at if previous else None)
+                    values["network_adapters"] = values["network_interfaces"]
                     details = {key: values.get(key) for key in ("network_interfaces", "network_adapters",
                         "processes", "system_information", "events")}
                     db.add(SystemMetricSnapshot(device_id=device_id,

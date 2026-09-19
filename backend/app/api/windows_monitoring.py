@@ -14,6 +14,7 @@ from app.schemas.monitoring_provider import MonitoringProfileInput, ServiceMonit
 from app.services.monitoring_providers import MonitoringProviderError
 from app.services.provider_factory import provider_for_device
 from app.services.metric_alerts import evaluate_metric_alerts
+from app.services.interface_metrics import enrich_interface_rates, selected_interfaces
 
 router = APIRouter(prefix="/api", tags=["Services and metrics monitoring"])
 SERVICE_PERIOD_HOURS = {"24h": 24, "7d": 24 * 7, "30d": 24 * 30, "90d": 24 * 90}
@@ -234,15 +235,22 @@ async def collect_metrics(device_id: int, db: AsyncSession = Depends(get_db)):
         provider, provider_name = await _provider(db, device)
         values = await provider.collect_system_metrics()
     except MonitoringProviderError as exc: raise HTTPException(409, {"code": exc.code, "message": str(exc)}) from exc
+    capability = (await db.execute(select(DeviceCapability).where(
+        DeviceCapability.device_id == device_id,
+        DeviceCapability.provider == provider_name))).scalar_one_or_none()
+    previous = (await db.execute(select(SystemMetricSnapshot).where(SystemMetricSnapshot.device_id == device_id)
+        .order_by(SystemMetricSnapshot.collected_at.desc()).limit(1))).scalar_one_or_none()
+    raw_interfaces = selected_interfaces(values.get("network_interfaces"), (capability.diagnostics or {}).get("selected_interface_indexes") if capability else None)
+    values["network_interfaces"] = enrich_interface_rates(raw_interfaces,
+        ((previous.storage or {}).get("network_interfaces") if previous else []), datetime.now(timezone.utc),
+        previous.collected_at if previous else None)
+    values["network_adapters"] = values["network_interfaces"]
     details = {key: values.get(key) for key in ("network_interfaces", "network_adapters", "processes",
         "system_information", "events")}
     item = SystemMetricSnapshot(device_id=device_id, cpu_percent=values.get("cpu_percent"),
         memory_percent=values.get("memory_percent"), uptime_seconds=values.get("uptime_seconds"),
         storage={"disks": values.get("storage") or [], **details})
     db.add(item)
-    capability = (await db.execute(select(DeviceCapability).where(
-        DeviceCapability.device_id == device_id,
-        DeviceCapability.provider == provider_name))).scalar_one_or_none()
     if capability: await evaluate_metric_alerts(db,device,values,capability.diagnostics or {})
     await db.commit(); await db.refresh(item)
     return _metric_snapshot(item)
@@ -272,6 +280,19 @@ async def metric_capabilities(device_id: int, db: AsyncSession = Depends(get_db)
         "metric_notifications_enabled": (saved.diagnostics or {}).get("metric_notifications_enabled", True) if saved else True}
 
 
+@router.get("/devices/{device_id}/metrics/interfaces")
+async def metric_interfaces(device_id: int, db: AsyncSession = Depends(get_db)):
+    device = await db.get(Device, device_id)
+    if not device: raise HTTPException(404, "Device not found")
+    provider, provider_name = await _provider(db, device)
+    if provider_name != "SNMP": raise HTTPException(409, "Interface selection is available for SNMP integrations")
+    values = await provider.collect_system_metrics()
+    capability = (await db.execute(select(DeviceCapability).where(DeviceCapability.device_id == device_id,
+        DeviceCapability.provider == provider_name))).scalar_one_or_none()
+    return {"interfaces": values.get("network_interfaces") or [],
+        "selected_interface_indexes": (capability.diagnostics or {}).get("selected_interface_indexes", []) if capability else []}
+
+
 @router.put("/devices/{device_id}/metrics/configuration")
 async def configure_metrics(device_id: int, payload: dict = Body(...), db: AsyncSession = Depends(get_db)):
     device = await db.get(Device, device_id)
@@ -297,6 +318,7 @@ async def configure_metrics(device_id: int, payload: dict = Body(...), db: Async
         clean_thresholds[key]={"enabled":bool(policy.get("enabled",True)),"warning":warning,"critical":critical}
     item.diagnostics = {**(item.diagnostics or {}), "enabled_metrics": selected,
         "metric_thresholds":clean_thresholds,
+        "selected_interface_indexes":[int(value) for value in payload.get("selected_interface_indexes") or []],
         "metric_notifications_enabled":bool(payload.get("metric_notifications_enabled",True))}
     await db.commit()
     return {"device_id": device_id, "enabled_metrics": selected}
@@ -353,10 +375,26 @@ async def create_profile(data: MonitoringProfileInput, db: AsyncSession = Depend
     item = MonitoringProfile(**data.model_dump()); db.add(item); await db.commit(); await db.refresh(item); return item
 
 
-@router.post("/devices/{device_id}/monitoring-profiles/{profile_id}/apply")
-async def apply_profile(device_id: int, profile_id: int, db: AsyncSession = Depends(get_db)):
-    profile = await db.get(MonitoringProfile, profile_id)
-    if not profile or not profile.enabled: raise HTTPException(404, "Monitoring profile not found")
+@router.put("/monitoring-profiles/{profile_id}")
+async def update_profile(profile_id: int, data: MonitoringProfileInput, db: AsyncSession = Depends(get_db)):
+    item = await db.get(MonitoringProfile, profile_id)
+    if not item: raise HTTPException(404, "Monitoring profile not found")
+    duplicate = (await db.execute(select(MonitoringProfile).where(
+        MonitoringProfile.name == data.name, MonitoringProfile.id != profile_id))).scalar_one_or_none()
+    if duplicate: raise HTTPException(409, "A monitoring profile with this name already exists")
+    for key, value in data.model_dump().items(): setattr(item, key, value)
+    await db.commit(); await db.refresh(item); return item
+
+
+@router.delete("/monitoring-profiles/{profile_id}", status_code=204)
+async def delete_profile(profile_id: int, db: AsyncSession = Depends(get_db)):
+    item = await db.get(MonitoringProfile, profile_id)
+    if not item: raise HTTPException(404, "Monitoring profile not found")
+    await db.delete(item); await db.commit()
+
+
+async def _apply_profile_to_device(db: AsyncSession, device_id: int, profile: MonitoringProfile) -> int:
+    if not await db.get(Device, device_id): raise HTTPException(404, f"Device {device_id} not found")
     services = (await db.execute(select(DiscoveredService).where(DiscoveredService.device_id == device_id))).scalars().all()
     defaults = {"expected_state": "running", "check_interval": 60, "failure_threshold": 1,
         "recovery_threshold": 2, "severity": "CRITICAL", "notifications_enabled": True, **(profile.defaults or {})}
@@ -367,4 +405,22 @@ async def apply_profile(device_id: int, profile_id: int, db: AsyncSession = Depe
         item.monitored = True; item.next_check_at = now
         for key in ("expected_state", "check_interval", "failure_threshold", "recovery_threshold", "severity", "notifications_enabled"):
             setattr(item, key, defaults[key])
-    await db.commit(); return {"profile": profile.name, "matched_services": len(matched)}
+    return len(matched)
+
+
+@router.post("/devices/{device_id}/monitoring-profiles/{profile_id}/apply")
+async def apply_profile(device_id: int, profile_id: int, db: AsyncSession = Depends(get_db)):
+    profile = await db.get(MonitoringProfile, profile_id)
+    if not profile or not profile.enabled: raise HTTPException(404, "Monitoring profile not found")
+    matched = await _apply_profile_to_device(db, device_id, profile)
+    await db.commit(); return {"profile": profile.name, "matched_services": matched}
+
+
+@router.post("/monitoring-profiles/{profile_id}/apply")
+async def apply_profile_bulk(profile_id: int, payload: dict = Body(...), db: AsyncSession = Depends(get_db)):
+    profile = await db.get(MonitoringProfile, profile_id)
+    if not profile or not profile.enabled: raise HTTPException(404, "Monitoring profile not found")
+    device_ids = list(dict.fromkeys(payload.get("device_ids") or []))
+    if not device_ids: raise HTTPException(400, "Select at least one device")
+    matched = {str(device_id): await _apply_profile_to_device(db, int(device_id), profile) for device_id in device_ids}
+    await db.commit(); return {"profile": profile.name, "devices": len(device_ids), "matched_services": matched}

@@ -1,12 +1,12 @@
 from datetime import datetime
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.alert import Alert, AlertSeverity
-from app.schemas.alert import AlertRead
+from app.schemas.alert import AlertAcknowledge, AlertRead
 
 router = APIRouter(prefix="/api/alerts", tags=["Alerts"])
 
@@ -61,6 +61,21 @@ async def resolve_alert(alert_id: int, db: AsyncSession = Depends(get_db)):
         alert.resolved_at = datetime.utcnow()
         await db.commit()
         await db.refresh(alert)
+    return alert
+
+
+@router.put("/{alert_id}/acknowledge", response_model=AlertRead)
+async def acknowledge_alert(alert_id: int, payload: AlertAcknowledge, request: Request,
+                            db: AsyncSession = Depends(get_db)):
+    alert = await db.get(Alert, alert_id)
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    user = getattr(request.state, "user", None)
+    alert.acknowledged_at = datetime.utcnow()
+    alert.acknowledged_by_user_id = getattr(user, "id", None)
+    alert.acknowledgement_note = (payload.note or "").strip() or None
+    await db.commit()
+    await db.refresh(alert)
     return alert
 
 
