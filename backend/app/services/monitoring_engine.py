@@ -1,7 +1,7 @@
 import asyncio
 import structlog
 from datetime import datetime, timedelta, timezone
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.orm import selectinload
 
 from app.database import async_session_factory
@@ -20,6 +20,7 @@ from app.api.websocket import manager as ws_manager
 from app.models.platform import SystemSetting
 from app.models.alert import Alert
 from app.config import get_settings
+from app.services.collector_coordination import collector_coordinator
 
 logger = structlog.get_logger()
 
@@ -46,6 +47,8 @@ class MonitoringEngine:
         self._cycle_interval = 5
         self._probe_concurrency = get_settings().MONITORING_PROBE_CONCURRENCY
         self._probe_batch_size = get_settings().MONITORING_PROBE_BATCH_SIZE
+        self._failures_to_down = state_tracker.failures_to_down
+        self._successes_to_up = state_tracker.successes_to_up
         self._retention_days = 90
         self._aggregate_retention_days = 1825
         self._last_retention_cleanup: datetime | None = None
@@ -57,6 +60,7 @@ class MonitoringEngine:
         self.failed_cycles = 0
         self.last_device_probe_count = 0
         self.last_deferred_device_probe_count = 0
+        self.last_claimed_device_probe_count = 0
 
     async def load_configuration(self):
         async with async_session_factory() as db:
@@ -71,6 +75,8 @@ class MonitoringEngine:
             self._aggregate_retention_days = max(self._retention_days, int(values.get("aggregate_retention_days", 1825)))
             state_tracker.failures_to_down = max(1, int(values.get("failure_threshold", state_tracker.failures_to_down)))
             state_tracker.successes_to_up = max(1, int(values.get("success_threshold", state_tracker.successes_to_up)))
+            self._failures_to_down = state_tracker.failures_to_down
+            self._successes_to_up = state_tracker.successes_to_up
             logger.info("monitoring_configuration_loaded", cycle_interval=self._cycle_interval,
                 retention_days=self._retention_days, failures_to_down=state_tracker.failures_to_down,
                 successes_to_up=state_tracker.successes_to_up, probe_concurrency=self._probe_concurrency,
@@ -99,6 +105,8 @@ class MonitoringEngine:
             await asyncio.gather(*tasks, return_exceptions=True)
         self._task = None
         self._maintenance_task = None
+        await collector_coordinator.release("topology-evaluation")
+        await collector_coordinator.release("retention-maintenance")
 
     async def _main_loop(self):
         while self._running:
@@ -106,8 +114,12 @@ class MonitoringEngine:
             try:
                 async with async_session_factory() as db:
                     await self._probe_all_devices(db)
-                    await self._probe_all_links(db)
-                    await self._evaluate_all_redundancy_groups(db)
+                    # Link/redundancy history is global rather than
+                    # device-owned. A renewable lease elects one collector to
+                    # write it, while a surviving node assumes it on expiry.
+                    if await collector_coordinator.claim("topology-evaluation"):
+                        await self._probe_all_links(db)
+                        await self._evaluate_all_redundancy_groups(db)
                 self.last_cycle_completed_at = datetime.now(timezone.utc)
                 self.last_cycle_duration_seconds = (self.last_cycle_completed_at - self.last_cycle_started_at).total_seconds()
                 self.last_cycle_error = None; self.completed_cycles += 1
@@ -125,8 +137,12 @@ class MonitoringEngine:
     async def _maintenance_loop(self):
         while self._running:
             try:
-                async with async_session_factory() as db:
-                    await self._cleanup_retention(db)
+                # Retention merges/deletes aggregate history and must have a
+                # single writer. Five minutes balances takeover speed with a
+                # bounded cleanup run on a large database.
+                if await collector_coordinator.claim("retention-maintenance", lease_seconds=300):
+                    async with async_session_factory() as db:
+                        await self._cleanup_retention(db)
             except asyncio.CancelledError:
                 break
             except Exception as error:
@@ -205,6 +221,10 @@ class MonitoringEngine:
         due_devices.sort(key=lambda device: self._normalise_timestamp(device.last_monitored_at) or datetime.min.replace(tzinfo=timezone.utc))
         self.last_deferred_device_probe_count = max(0, len(due_devices) - self._probe_batch_size)
         due_devices = due_devices[:self._probe_batch_size]
+        selected_due_count = len(due_devices)
+        due_devices = await self._claim_due_devices(db, due_devices, now)
+        self.last_deferred_device_probe_count += selected_due_count - len(due_devices)
+        self.last_claimed_device_probe_count = len(due_devices)
         self.last_device_probe_count = len(due_devices)
         gateway_ping_cache: dict[str, dict] = {}
         self._latest_device_probes = {}
@@ -223,10 +243,10 @@ class MonitoringEngine:
             is_up = ping_res["is_up"]
             dependency_down, dependency_reason = await self._detect_downstream_dependency(
                 device, gateway_ping_cache, probe_by_ip)
-            initial_state = "UP" if device.status == DeviceStatus.ONLINE else "DOWN" if device.status == DeviceStatus.OFFLINE else "UNKNOWN"
-            stable_state, _ = state_tracker.update("DEVICE", device.id, is_up, initial_state)
+            stable_state = self._advance_device_state(device, is_up)
             new_status = DeviceStatus.ONLINE if stable_state == "UP" else (
-                DeviceStatus.DEGRADED if dependency_down else DeviceStatus.OFFLINE
+                DeviceStatus.UNKNOWN if stable_state == "UNKNOWN" else
+                (DeviceStatus.DEGRADED if dependency_down else DeviceStatus.OFFLINE)
             )
             if device.status != new_status:
                 device.status = new_status
@@ -272,6 +292,33 @@ class MonitoringEngine:
         for event in status_events:
             await ws_manager.broadcast("device_status_change", event)
 
+    async def _claim_due_devices(self, db, devices: list[Device], now: datetime) -> list[Device]:
+        """Atomically assign due probes to this collector.
+
+        Every collector sees the same due inventory but only the conditional
+        owner update wins. The lease expires after a failed process, allowing a
+        surviving collector to retry; a normal completion advances
+        ``last_monitored_at`` and prevents duplicate work on the next cycle.
+        """
+        settings = get_settings()
+        owner_id = settings.collector_id
+        expires_at = now + timedelta(seconds=max(10, settings.COLLECTOR_LEASE_SECONDS))
+        claim_limit = max(0, settings.COLLECTOR_DEVICE_CLAIM_LIMIT)
+        claimed: list[Device] = []
+        for device in devices:
+            if claim_limit and len(claimed) >= claim_limit:
+                break
+            result = await db.execute(update(Device).where(
+                Device.id == device.id,
+                or_(Device.probe_owner_id == owner_id,
+                    Device.probe_lease_expires_at.is_(None),
+                    Device.probe_lease_expires_at <= now),
+            ).values(probe_owner_id=owner_id, probe_lease_expires_at=expires_at))
+            if result.rowcount:
+                claimed.append(device)
+        await db.commit()
+        return claimed
+
     @staticmethod
     def _normalise_timestamp(value: datetime | None) -> datetime | None:
         if value is None:
@@ -281,6 +328,18 @@ class MonitoringEngine:
     def _device_is_due(self, device: Device, now: datetime) -> bool:
         last_probe = self._normalise_timestamp(device.last_monitored_at)
         return last_probe is None or now - last_probe >= timedelta(seconds=max(1, device.monitoring_interval))
+
+    def _advance_device_state(self, device: Device, is_up: bool) -> str:
+        """Persist probe hysteresis so collector failover never resets it."""
+        current = "UP" if device.status == DeviceStatus.ONLINE else (
+            "DOWN" if device.status in {DeviceStatus.OFFLINE, DeviceStatus.DEGRADED} else "UNKNOWN")
+        if is_up:
+            device.consecutive_probe_successes = (device.consecutive_probe_successes or 0) + 1
+            device.consecutive_probe_failures = 0
+            return "UP" if current == "UNKNOWN" or device.consecutive_probe_successes >= self._successes_to_up else current
+        device.consecutive_probe_failures = (device.consecutive_probe_failures or 0) + 1
+        device.consecutive_probe_successes = 0
+        return "DOWN" if device.consecutive_probe_failures >= self._failures_to_down else current
 
     async def _run_device_probes(self, devices: list[Device]) -> list[tuple[Device, dict]]:
         """Probe in bounded parallelism while keeping database work single-session.

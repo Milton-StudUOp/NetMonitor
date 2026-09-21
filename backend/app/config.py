@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+import socket
 from typing import Any, List
 
 from pydantic import field_validator
@@ -37,6 +38,14 @@ class Settings(BaseSettings):
     # configuration, never credentials or implicit per-device defaults.
     MONITORING_PROBE_CONCURRENCY: int = 100
     MONITORING_PROBE_BATCH_SIZE: int = 1000
+    COLLECTOR_ID: str = ""
+    COLLECTOR_LEASE_SECONDS: int = 45
+    COLLECTOR_ENABLED: bool = True
+    # Zero keeps the local single-collector behaviour. In an HA topology use
+    # a finite value so a first-started node cannot claim the whole estate.
+    COLLECTOR_DEVICE_CLAIM_LIMIT: int = 0
+    REMOTE_MONITORING_CONCURRENCY: int = 10
+    REMOTE_MONITORING_BATCH_SIZE: int = 0
 
     # State machine thresholds
     FAILURES_TO_DOWN: int = 3
@@ -100,6 +109,10 @@ class Settings(BaseSettings):
     @property
     def cors_origins(self) -> list[str]:
         return [item.strip() for item in self.CORS_ALLOWED_ORIGINS.split(",") if item.strip()]
+
+    @property
+    def collector_id(self) -> str:
+        return self.COLLECTOR_ID.strip() or socket.gethostname()
 
 
 @lru_cache

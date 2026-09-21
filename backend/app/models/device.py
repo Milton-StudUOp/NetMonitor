@@ -55,6 +55,10 @@ class Device(Base):
     # restart from probing the entire estate at once and makes per-device
     # intervals effective across process restarts.
     last_monitored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    probe_owner_id: Mapped[str | None] = mapped_column(String(191), nullable=True, index=True)
+    probe_lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    consecutive_probe_failures: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    consecutive_probe_successes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     status: Mapped[DeviceStatus] = mapped_column(
         Enum(DeviceStatus), default=DeviceStatus.UNKNOWN, nullable=False
     )

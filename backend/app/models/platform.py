@@ -149,6 +149,20 @@ class SystemSetting(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
+class CollectorLease(Base):
+    """Portable, database-backed lease for collector coordination and work.
+
+    A lease expires automatically when its owner fails.  It intentionally uses
+    ordinary SQL columns so the same safety property is available on the
+    supported database engines, rather than depending on vendor-specific locks.
+    """
+    __tablename__ = "collector_leases"
+    scope: Mapped[str] = mapped_column(String(191), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(191), index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class AuditLog(Base):
     __tablename__ = "audit_logs"
     id: Mapped[int] = mapped_column(Integer, Identity(), primary_key=True)

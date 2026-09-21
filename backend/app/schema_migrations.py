@@ -1,6 +1,6 @@
 from sqlalchemy import inspect
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 
 async def ensure_runtime_schema(engine) -> None:
@@ -100,11 +100,22 @@ async def ensure_runtime_schema(engine) -> None:
         if "last_monitored_at" not in device_columns:
             timestamp_type = "DATETIME2 NULL" if dialect == "mssql" else "TIMESTAMP NULL"
             await conn.exec_driver_sql(_add_column_sql(dialect, "devices", "last_monitored_at", timestamp_type))
+        if "probe_owner_id" not in device_columns:
+            await conn.exec_driver_sql(_add_column_sql(dialect, "devices", "probe_owner_id", "VARCHAR(191)"))
+        if "probe_lease_expires_at" not in device_columns:
+            timestamp_type = "DATETIME2 NULL" if dialect == "mssql" else "TIMESTAMP NULL"
+            await conn.exec_driver_sql(_add_column_sql(dialect, "devices", "probe_lease_expires_at", timestamp_type))
+        if "consecutive_probe_failures" not in device_columns:
+            await conn.exec_driver_sql(_add_column_sql(dialect, "devices", "consecutive_probe_failures", "INTEGER DEFAULT 0 NOT NULL"))
+        if "consecutive_probe_successes" not in device_columns:
+            await conn.exec_driver_sql(_add_column_sql(dialect, "devices", "consecutive_probe_successes", "INTEGER DEFAULT 0 NOT NULL"))
         device_indexes = await conn.run_sync(
             lambda sync_conn: {index["name"] for index in inspect(sync_conn).get_indexes("devices")}
         )
         if "ix_devices_last_monitored_at" not in device_indexes:
             await conn.exec_driver_sql("CREATE INDEX ix_devices_last_monitored_at ON devices (last_monitored_at)")
+        if "ix_devices_probe_lease_expires_at" not in device_indexes:
+            await conn.exec_driver_sql("CREATE INDEX ix_devices_probe_lease_expires_at ON devices (probe_lease_expires_at)")
 
         alert_columns = await conn.run_sync(
             lambda sync_conn: {col["name"] for col in inspect(sync_conn).get_columns("alerts")}

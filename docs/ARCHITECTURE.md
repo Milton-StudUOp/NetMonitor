@@ -5,13 +5,17 @@
 ```text
 React/Vite
    │ authenticated REST + WebSocket
-FastAPI
+FastAPI API replicas (`COLLECTOR_ENABLED=false`)
    ├── authentication and backend RBAC
    ├── administrative APIs
+   ├── load-balanced WebSocket/API access
+   │
+Collector replicas (`COLLECTOR_ENABLED=true`)
    ├── monitoring engine
    ├── redundancy and alerts
    ├── notifications
-   └── asynchronous SQLAlchemy
+   └── durable lease/work coordination
+          │
           └── selected primary database
 ```
 
@@ -58,6 +62,25 @@ An independent hourly maintenance task converts expiring raw samples into hourly
 All non-public HTTP and WebSocket operations use expiring bearer sessions. REST sends the bearer token in its authorization header; WebSocket sends it in the first private message rather than the URL. Passwords use salted scrypt hashes, only session and recovery-code digests are persisted, and backend middleware enforces Viewer, Operator, and Administrator permissions. The first account is created through a deployment-specific, one-time bootstrap token; there is no built-in administrative identity.
 
 The monitoring probe loop and retention maintenance run as separate asynchronous tasks. Retention reads bounded batches so cleanup does not load the complete historical table into memory or delay a monitoring cycle.
+
+### Multiple collectors and failover
+
+The primary database is also the portable coordination plane. A collector claims
+each due device using a conditional lease update before making a remote probe.
+Only the successful conditional write may monitor that device. A lease expires
+automatically after `COLLECTOR_LEASE_SECONDS`, so another collector can take
+over after a process or host failure. Remote service/metric checks use the same
+lease model with a dedicated work scope. This is a durable database work queue:
+it has no in-memory broker state to lose and works with every supported primary
+database.
+
+Each collector has a stable, unique `COLLECTOR_ID`; API-only replicas set
+`COLLECTOR_ENABLED=false`. System Health exposes active lease owners, probe
+batch/deferred counts, cycle duration, and file-descriptor use. SQLite is
+appropriate for one local collector only. A multi-node deployment requires a
+shared highly available primary database and a stable `SECRET_KEY` on every
+replica. A load balancer distributes HTTP/WebSocket clients across API replicas;
+it does not run collectors itself.
 
 ## Notifications
 

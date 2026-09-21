@@ -36,15 +36,20 @@ async def lifespan(app: FastAPI):
     await ensure_runtime_schema(database.engine)
     await ensure_builtin_profiles()
 
-    # Start background monitoring engine
-    await monitoring_engine.load_configuration()
-    monitoring_engine.start()
-    windows_monitoring_engine.start()
+    # API replicas can run without collectors. Collector replicas coordinate
+    # work through the shared primary database, enabling horizontal scale and
+    # failover without duplicating every probe.
+    if settings.COLLECTOR_ENABLED:
+        await monitoring_engine.load_configuration()
+        monitoring_engine.start()
+        windows_monitoring_engine.start()
+    else:
+        logger.info("collector_disabled_for_api_replica")
 
     yield
 
     logger.info("application_shutdown")
-    monitoring_engine.stop()
+    await monitoring_engine.stop_and_wait()
     await windows_monitoring_engine.stop_and_wait()
 
 

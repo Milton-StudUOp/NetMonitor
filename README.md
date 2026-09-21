@@ -28,6 +28,7 @@ Active development is performed on the `dev` branch. Use `main` only for stable 
 - Inventory, topology, redundancy, rules, and preferences backup and restore.
 - Local accounts, role-based access, first-access passwords, self-service password changes, and email recovery.
 - Password hashing, encrypted integration secrets, session-token digests, and an audit trail.
+- Horizontally scalable collectors with durable database leases and automatic collector failover.
 
 ## Local quick start
 

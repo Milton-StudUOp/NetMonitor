@@ -7,7 +7,7 @@ from app.models.monitoring_result import MetricAggregate, MonitoringResult, Moni
 from app.models.alert import Alert, AlertSeverity  # noqa: F401
 from app.models.monitoring_provider import (DeviceCapability, DeviceMonitoringCredential, DiscoveredService,
     MonitoringProfile, ServiceCheckHistory, SystemMetricSnapshot)  # noqa: F401
-from app.models.platform import (AuditLog, DatabaseConnection, DatabaseDataSource, DatabaseSchemaVersion, IconAsset, NotificationDelivery,
+from app.models.platform import (AuditLog, CollectorLease, DatabaseConnection, DatabaseDataSource, DatabaseSchemaVersion, IconAsset, NotificationDelivery,
                                  NotificationIntegration, NotificationRule, SystemSetting, TopologyPosition, TopologySnapshot,
                                  ServiceTopologyLayout, ServiceTopologySnapshot,
                                  UserAccount, AuthSession, PasswordResetToken)  # noqa: F401
@@ -22,6 +22,6 @@ __all__ = [
     "Alert", "AlertSeverity",
     "DeviceCapability", "DeviceMonitoringCredential",
     "DiscoveredService", "MonitoringProfile", "ServiceCheckHistory", "SystemMetricSnapshot",
-    "AuditLog", "DatabaseConnection", "DatabaseDataSource", "DatabaseSchemaVersion", "IconAsset", "NotificationDelivery", "NotificationIntegration",
+    "AuditLog", "CollectorLease", "DatabaseConnection", "DatabaseDataSource", "DatabaseSchemaVersion", "IconAsset", "NotificationDelivery", "NotificationIntegration",
     "NotificationRule", "SystemSetting", "TopologyPosition", "TopologySnapshot", "ServiceTopologyLayout", "ServiceTopologySnapshot", "UserAccount", "AuthSession", "PasswordResetToken",
 ]

@@ -57,11 +57,84 @@ latency, cycle duration, and deferred probes in **System Health**. A non-zero
 `deferred_device_probe_count` means the collector cannot service all due
 devices within its current batch capacity.
 
-This is a single-collector capacity baseline, not a promise of high
-availability. Run one backend collector process only; multiple ASGI workers
-would otherwise start duplicate in-process collectors. For redundant or larger
-deployments, separate the collector from the API and introduce durable
-distributed scheduling before adding a second collector.
+This is a single-collector capacity baseline. For high availability, use the
+separate API and collector topology described below; do not use multiple ASGI
+workers in a collector process because each worker is an independent scheduler.
+
+## High availability: two collectors and API replicas
+
+The application now has durable, database-backed collector leases. To run
+approximately 1,000 devices with collector failover, use at least two hosts or
+VMs and a **shared highly available primary database** (not SQLite). Configure
+the same `DATABASE_URL`, `SECRET_KEY`, notification configuration, and release
+on every replica. Give each collector a unique stable name:
+
+```ini
+# collector-a/.env
+COLLECTOR_ENABLED=true
+COLLECTOR_ID=collector-a
+COLLECTOR_LEASE_SECONDS=45
+MONITORING_PROBE_CONCURRENCY=100
+MONITORING_PROBE_BATCH_SIZE=1000
+COLLECTOR_DEVICE_CLAIM_LIMIT=500
+REMOTE_MONITORING_CONCURRENCY=25
+REMOTE_MONITORING_BATCH_SIZE=500
+
+# collector-b/.env
+COLLECTOR_ENABLED=true
+COLLECTOR_ID=collector-b
+COLLECTOR_LEASE_SECONDS=45
+COLLECTOR_DEVICE_CLAIM_LIMIT=500
+REMOTE_MONITORING_CONCURRENCY=25
+REMOTE_MONITORING_BATCH_SIZE=500
+```
+
+The claim/batch values divide the first 1,000 due devices between two
+collectors instead of letting the first-started replica reserve the complete
+inventory. Keep the sum of all collector limits at least as large as the
+expected simultaneous due set. Increase remote concurrency only after testing
+the target protocols and the collector's descriptor/CPU limits.
+
+Reusable systemd unit templates are in
+[`deploy/systemd`](../deploy/systemd). Copy `netmonitor-api.service` to each
+API host and `netmonitor-collector.service` to each collector host, then place
+the corresponding restricted environment file under `/etc/netmonitor/`. After
+reviewing the service account and repository paths for the host, install and
+start it with:
+
+```bash
+sudo install -m 0644 deploy/systemd/netmonitor-collector.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now netmonitor-collector
+sudo systemctl status netmonitor-collector
+```
+
+The templates set `Restart=always` and `LimitNOFILE=65536`; they deliberately
+do not use `--reload` or multi-worker Uvicorn. Put only API replicas behind the
+load balancer. If collectors should not accept user traffic, restrict their
+port 5555 access to the private administration/load-balancer network with the
+host firewall.
+
+Run the API tier separately with `COLLECTOR_ENABLED=false`, distinct
+`COLLECTOR_ID` values, and at least two replicas behind a TLS-capable load
+balancer. Do not use `uvicorn --workers` for collector replicas: every worker
+would be an independent scheduler. One Uvicorn process per collector is the
+supported topology. A failed collector's outstanding device/service lease
+becomes available after the configured lease duration; verify the takeover in
+**System Health → active collector IDs**.
+
+The database itself remains a dependency: use its vendor-supported replication,
+automatic failover, backups, and monitoring. Redis may be used by surrounding
+infrastructure, but NetMonitor's probe ownership is stored in the primary
+database to retain SQLite/PostgreSQL/MySQL/SQL Server/Oracle portability. Never
+place a SQLite file on a shared network filesystem for HA.
+
+Before declaring the service production-ready, run a representative load test
+with at least 1,000 devices or safe simulators, then deliberately stop one
+collector. Confirm that no device receives duplicate checks during normal
+operation, that work is taken over within the lease window, and that database
+latency, descriptor count, deferred probes, and alert delivery remain within
+your operational thresholds.
 
 ## Alert severity and delivery checks
 

@@ -15,6 +15,8 @@ from app.services.provider_factory import provider_for_device
 from app.services.metric_alerts import evaluate_metric_alerts
 from app.services.interface_metrics import enrich_interface_rates, selected_interfaces
 from app.services.notification.dispatcher import dispatch_persisted_notifications
+from app.services.collector_coordination import collector_coordinator
+from app.config import get_settings
 
 logger = structlog.get_logger()
 
@@ -32,9 +34,9 @@ def service_state_transition(current: str, healthy: bool, failures: int, success
 
 
 class WindowsMonitoringEngine:
-    def __init__(self, worker_limit: int = 10):
-        self._running = False; self._task = None; self._semaphore = asyncio.Semaphore(worker_limit)
-        self._last_metric_check: dict[int, datetime] = {}
+    def __init__(self, worker_limit: int | None = None):
+        self.worker_limit = worker_limit or max(1, get_settings().REMOTE_MONITORING_CONCURRENCY)
+        self._running = False; self._task = None; self._semaphore = asyncio.Semaphore(self.worker_limit)
 
     def start(self):
         if not self._running:
@@ -68,7 +70,24 @@ class WindowsMonitoringEngine:
                                  if (item.diagnostics or {}).get("enabled_metrics") and self._metric_is_due(item, metric_due_before)]
         device_ids = set(service_device_ids)
         device_ids.update(metric_device_ids)
-        await asyncio.gather(*(self._check_device(device_id, now) for device_id in device_ids))
+        claimed_ids = await self._claim_due_checks(device_ids)
+        await asyncio.gather(*(self._check_device(device_id, now, claimed=True) for device_id in claimed_ids))
+
+    async def _claim_due_checks(self, device_ids: set[int]) -> list[int]:
+        """Claim remote checks before creating local tasks.
+
+        Iterating beyond an unavailable lease lets a second collector claim the
+        next devices in the sorted work set instead of repeatedly contending
+        for the same first batch.
+        """
+        claim_limit = max(0, get_settings().REMOTE_MONITORING_BATCH_SIZE)
+        claimed: list[int] = []
+        for device_id in sorted(device_ids):
+            if claim_limit and len(claimed) >= claim_limit:
+                break
+            if await collector_coordinator.claim(f"remote-check:{device_id}"):
+                claimed.append(device_id)
+        return claimed
 
     @staticmethod
     def _metric_is_due(capability: DeviceCapability, due_before: datetime) -> bool:
@@ -79,31 +98,37 @@ class WindowsMonitoringEngine:
             last_collected = last_collected.replace(tzinfo=timezone.utc)
         return last_collected <= due_before
 
-    async def _check_device(self, device_id: int, now: datetime):
+    async def _check_device(self, device_id: int, now: datetime, claimed: bool = False):
         # Build the transport while a short-lived database session is open,
         # then release that session before SSH, SNMP, or WinRM performs any
         # network I/O. A slow remote host must consume a collector slot, not a
         # database connection from the API pool.
         async with self._semaphore:
+            scope = f"remote-check:{device_id}"
+            if not claimed and not await collector_coordinator.claim(scope):
+                return
             context = await self._load_check_context(device_id, now)
-            if context is None:
-                return
-            (device, services, diagnostics, capability_provider, provider, provider_name, enabled_metrics,
-             metric_due, previous_storage, previous_collected_at) = context
-            started = perf_counter()
             try:
-                observed = await provider.check_services([item.name for item in services])
-                elapsed = round((perf_counter() - started) * 1000, 2)
-                values = await provider.collect_system_metrics() if metric_due else None
-            except (MonitoringProviderError, asyncio.TimeoutError) as exc:
-                code = exc.code if isinstance(exc, MonitoringProviderError) else "CHECK_TIMEOUT"
-                await self._persist_remote_error(services, code, now)
-                return
-            await self._persist_check_result(
-                device.id, services, diagnostics or {}, capability_provider, provider_name,
-                enabled_metrics, observed, elapsed, values, previous_storage,
-                previous_collected_at, now,
-            )
+                if context is None:
+                    return
+                (device, services, diagnostics, capability_provider, provider, provider_name, enabled_metrics,
+                 metric_due, previous_storage, previous_collected_at) = context
+                started = perf_counter()
+                try:
+                    observed = await provider.check_services([item.name for item in services])
+                    elapsed = round((perf_counter() - started) * 1000, 2)
+                    values = await provider.collect_system_metrics() if metric_due else None
+                except (MonitoringProviderError, asyncio.TimeoutError) as exc:
+                    code = exc.code if isinstance(exc, MonitoringProviderError) else "CHECK_TIMEOUT"
+                    await self._persist_remote_error(services, code, now)
+                    return
+                await self._persist_check_result(
+                    device.id, services, diagnostics or {}, capability_provider, provider_name,
+                    enabled_metrics, observed, elapsed, values, previous_storage,
+                    previous_collected_at, now,
+                )
+            finally:
+                await collector_coordinator.release(scope)
 
     async def _load_check_context(self, device_id: int, now: datetime):
         async with async_session_factory() as db:
@@ -188,7 +213,6 @@ class WindowsMonitoringEngine:
                         **{key: value if key in allowed or (key == "network_adapters" and "network_interfaces" in allowed) else []
                            for key, value in details.items()}}))
                 await evaluate_metric_alerts(db, device, values, diagnostics)
-                self._last_metric_check[device_id] = now
                 if capability_provider:
                     capability = (await db.execute(select(DeviceCapability).where(
                         DeviceCapability.device_id == device_id,

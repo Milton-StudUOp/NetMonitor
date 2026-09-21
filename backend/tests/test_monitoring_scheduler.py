@@ -31,6 +31,20 @@ def test_naive_last_probe_time_is_normalized_for_mysql_compatibility():
     assert engine._device_is_due(device, now) is False
 
 
+def test_probe_hysteresis_is_stored_on_the_device_for_collector_failover():
+    engine = MonitoringEngine(); engine._failures_to_down = 3; engine._successes_to_up = 2
+    device = Device(name="edge-state", ip_address="192.0.2.12", device_type=DeviceType.ROUTER,
+                    location="test")
+    assert engine._advance_device_state(device, False) == "UNKNOWN"
+    assert device.consecutive_probe_failures == 1
+    # A replacement collector receives the persisted device counters and can
+    # continue the threshold rather than restarting false-positive protection.
+    replacement = MonitoringEngine(); replacement._failures_to_down = 3
+    assert replacement._advance_device_state(device, False) == "UNKNOWN"
+    assert replacement._advance_device_state(device, False) == "DOWN"
+    assert device.consecutive_probe_failures == 3
+
+
 def test_metric_schedule_is_durable_and_accepts_naive_database_timestamps():
     due_before = datetime.now(timezone.utc) - timedelta(seconds=60)
     capability = DeviceCapability(device_id=1, provider="SNMP")

@@ -1,0 +1,22 @@
+[Unit]
+Description=NetMonitor API replica
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=netmonitor
+Group=netmonitor
+WorkingDirectory=/var/www/cln/NetMonitor/backend
+EnvironmentFile=/etc/netmonitor/api.env
+Environment=COLLECTOR_ENABLED=false
+ExecStart=/var/www/cln/NetMonitor/backend/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 5555
+Restart=always
+RestartSec=5
+TimeoutStopSec=60
+LimitNOFILE=65536
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
