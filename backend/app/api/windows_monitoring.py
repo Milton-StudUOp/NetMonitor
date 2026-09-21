@@ -290,10 +290,13 @@ async def metric_interfaces(device_id: int, db: AsyncSession = Depends(get_db)):
     if not device: raise HTTPException(404, "Device not found")
     provider, provider_name = await _provider(db, device)
     if provider_name != "SNMP": raise HTTPException(409, "Interface selection is available for SNMP integrations")
-    values = await provider.collect_system_metrics()
+    try:
+        interfaces = await provider.discover_interfaces()
+    except MonitoringProviderError as exc:
+        raise HTTPException(409, {"code": exc.code, "message": str(exc)}) from exc
     capability = (await db.execute(select(DeviceCapability).where(DeviceCapability.device_id == device_id,
         DeviceCapability.provider == provider_name))).scalar_one_or_none()
-    return {"interfaces": values.get("network_interfaces") or [],
+    return {"interfaces": interfaces,
         "selected_interface_indexes": (capability.diagnostics or {}).get("selected_interface_indexes", []) if capability else []}
 
 

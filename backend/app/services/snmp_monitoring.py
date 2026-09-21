@@ -194,7 +194,28 @@ class SNMPMonitoringProvider(MonitoringProvider):
         }
 
     async def discover_metric_capabilities(self) -> dict[str, dict]:
-        detected = await self.detect_capabilities()
+        # Metric selection must respond before the full polling payload is
+        # required. The former implementation called ``detect_capabilities``
+        # here, then the UI called ``collect_system_metrics`` again to show
+        # interfaces: two complete IF-MIB/HOST-RESOURCES-MIB walks before the
+        # user could select anything. A lightweight capability check is enough
+        # at this stage; the full walks remain part of actual collection.
+        try:
+            system = await self.transport.get(OID_SYS_UPTIME)
+        except MonitoringProviderError:
+            raise
+        except Exception as exc:
+            raise SNMPMonitoringError("SNMP_UNAVAILABLE", "SNMP agent is unavailable or not responding") from exc
+        interfaces = await self._optional_walk(OID_IF_DESCR, limit=500)
+        storage = await self._optional_walk(OID_HR_STORAGE_DESCR, limit=100)
+        capabilities = {
+            "cpu": False,
+            "memory": False,
+            "uptime": _int_or_none(system.get(OID_SYS_UPTIME)) is not None,
+            "storage": bool(storage),
+            "network_interfaces": bool(interfaces),
+            "system_information": True,
+        }
         labels = {
             "cpu": "CPU",
             "memory": "Memory",
@@ -206,11 +227,32 @@ class SNMPMonitoringProvider(MonitoringProvider):
         return {
             key: {
                 "label": labels[key],
-                "supported": bool(detected.capabilities.get(key)),
+                "supported": bool(capabilities.get(key)),
                 "source": "SNMP",
             }
             for key in labels
         }
+
+    async def discover_interfaces(self, limit: int = 500) -> list[dict]:
+        """Return the compact inventory used by the interface picker.
+
+        Counters, errors, MTU, and storage are unnecessary before the user has
+        selected interfaces. Omitting them removes slow walks from this UI path
+        while regular monitoring still collects the full data set afterwards.
+        """
+        descriptions = await self._optional_walk(OID_IF_DESCR, limit=limit)
+        if not descriptions:
+            return []
+        types = await self._optional_walk(OID_IF_TYPE, limit=limit)
+        speeds = await self._optional_walk(OID_IF_SPEED, limit=limit)
+        operational = await self._optional_walk(OID_IF_OPER_STATUS, limit=limit)
+        return [{
+            "index": index,
+            "name": name,
+            "type": IF_TYPE_LABELS.get(_int_or_none(types.get(index)), str(_int_or_none(types.get(index))) if _int_or_none(types.get(index)) is not None else None),
+            "speed_bps": _int_or_none(speeds.get(index)),
+            "oper_status": STATUS_LABELS.get(_int_or_none(operational.get(index)), "unknown"),
+        } for index, name in sorted(descriptions.items())]
 
     async def _optional_walk(self, oid: str, limit: int = 500) -> dict[int, Any]:
         try:

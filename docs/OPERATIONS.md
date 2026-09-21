@@ -1,11 +1,16 @@
 # Operations and Upgrades
 
+`<INSTALL_DIR>` means the directory where this repository was cloned or
+deployed. It is intentionally not a fixed server path; for example it might be
+`/srv/netmonitor` on Linux, `/Users/name/NetMonitor` on macOS, or a directory
+chosen by the operator on Windows.
+
 ## Start and stop
 
 Run the backend from the repository installation:
 
 ```bash
-cd /var/www/cln/NetMonitor/backend
+cd <INSTALL_DIR>/backend
 source venv/bin/activate
 uvicorn app.main:app --host 0.0.0.0 --port 5555
 ```
@@ -19,7 +24,7 @@ only one backend process remains, then restart without `--reload`:
 
 ```bash
 pkill -f 'uvicorn app.main:app'
-cd /var/www/cln/NetMonitor/backend
+cd <INSTALL_DIR>/backend
 source venv/bin/activate
 uvicorn app.main:app --host 0.0.0.0 --port 5555
 ```
@@ -96,14 +101,14 @@ expected simultaneous due set. Increase remote concurrency only after testing
 the target protocols and the collector's descriptor/CPU limits.
 
 Reusable systemd unit templates are in
-[`deploy/systemd`](../deploy/systemd). Copy `netmonitor-api.service` to each
-API host and `netmonitor-collector.service` to each collector host, then place
-the corresponding restricted environment file under `/etc/netmonitor/`. After
-reviewing the service account and repository paths for the host, install and
-start it with:
+[`deploy/systemd`](../deploy/systemd). These are Linux-only templates; replace
+`@INSTALL_DIR@`, `@SERVICE_USER@`, and `@SERVICE_GROUP@` before installing one
+on each applicable host. Place the corresponding restricted environment file
+under `/etc/netmonitor/`. For example, from the repository root on Linux:
 
 ```bash
-sudo install -m 0644 deploy/systemd/netmonitor-collector.service /etc/systemd/system/
+sed -e "s|@INSTALL_DIR@|$(pwd)|g" -e "s|@SERVICE_USER@|$USER|g" -e "s|@SERVICE_GROUP@|$(id -gn)|g" \
+  deploy/systemd/netmonitor-collector.service.template | sudo tee /etc/systemd/system/netmonitor-collector.service >/dev/null
 sudo systemctl daemon-reload
 sudo systemctl enable --now netmonitor-collector
 sudo systemctl status netmonitor-collector
@@ -114,6 +119,13 @@ do not use `--reload` or multi-worker Uvicorn. Put only API replicas behind the
 load balancer. If collectors should not accept user traffic, restrict their
 port 5555 access to the private administration/load-balancer network with the
 host firewall.
+
+On macOS, use a `launchd` service or an approved supervisor to start the same
+portable command from `<INSTALL_DIR>/backend`; on Windows, use the Service
+Control Manager or an approved service wrapper. Those platforms do not consume
+the Linux systemd templates. In every case, set the working directory to the
+local installation directory and invoke the virtual environment's Python/Uvicorn
+binary from that installation, rather than copying a path from another host.
 
 Run the API tier separately with `COLLECTOR_ENABLED=false`, distinct
 `COLLECTOR_ID` values, and at least two replicas behind a TLS-capable load

@@ -1,30 +1,27 @@
 import React, { Suspense, lazy, useEffect, useState } from 'react';
-import { Server, Network, GitFork, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { Server, Network, GitFork, AlertTriangle } from 'lucide-react';
 import api from '../api/client';
 import StatusCard from '../components/StatusCard';
 import AlertBanner from '../components/AlertBanner';
-import RedundancyPanel from '../components/RedundancyPanel';
 import TopologyGraph from '../components/TopologyGraph';
+import { MonitoredDevicesSection } from './MetricsMonitoring';
 
 const ServiceTopology = lazy(() => import('./ServiceTopology'));
 
 export default function Dashboard() {
   const [summary, setSummary] = useState(null);
   const [alerts, setAlerts] = useState([]);
-  const [redundancyGroups, setRedundancyGroups] = useState([]);
   const [topology, setTopology] = useState(null);
 
   const fetchData = async () => {
     try {
-      const [sumRes, alertRes, rgRes, topoRes] = await Promise.all([
+      const [sumRes, alertRes, topoRes] = await Promise.all([
         api.get('/dashboard/summary'),
         api.get('/alerts?is_resolved=false'),
-        api.get('/redundancy-groups'),
         api.get('/topology'),
       ]);
       setSummary(sumRes.data);
       setAlerts(alertRes.data);
-      setRedundancyGroups(rgRes.data);
       setTopology(topoRes.data);
     } catch (err) {
       console.error('Failed to fetch dashboard data:', err);
@@ -84,20 +81,6 @@ export default function Dashboard() {
         />
       </div>
 
-      {/* Redundancy Groups Overview */}
-      <div style={{ marginBottom: '24px' }}>
-        <h2 style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <ShieldCheck size={20} color="var(--color-info)" /> Real-Time Redundancy Status
-        </h2>
-        {redundancyGroups.length === 0 ? (
-          <div className="glass-card" style={{ padding: '20px', color: 'var(--text-muted)' }}>
-            No redundancy groups registered.
-          </div>
-        ) : (
-          redundancyGroups.map((g) => <RedundancyPanel key={g.id} group={g} />)
-        )}
-      </div>
-
       {/* Full-width topology */}
       <div>
           <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '12px' }}>
@@ -108,6 +91,9 @@ export default function Dashboard() {
       <div className="dashboard-topology-section">
         <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text-main)', marginBottom: '12px' }}>Service Topology</h3>
         <Suspense fallback={<div className="glass-card analytics-state">Loading service topology…</div>}><ServiceTopology embedded /></Suspense>
+      </div>
+      <div className="dashboard-topology-section">
+        <MonitoredDevicesSection embedded />
       </div>
     </div>
   );

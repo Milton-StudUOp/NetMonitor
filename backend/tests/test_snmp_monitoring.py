@@ -91,3 +91,20 @@ async def test_snmp_keeps_available_metrics_when_optional_oids_are_missing():
     assert result["uptime_seconds"] == 123
     assert result["network_interfaces"][0]["name"] == "eth0"
     assert result["storage"] == []
+
+
+@pytest.mark.asyncio
+async def test_snmp_interface_picker_uses_compact_inventory_walks_only():
+    class CountingTransport(FakeSNMPTransport):
+        def __init__(self): self.walked = []
+        async def walk(self, oid, limit=500):
+            self.walked.append(oid)
+            return await super().walk(oid, limit)
+
+    transport = CountingTransport()
+    provider = SNMPMonitoringProvider(transport)
+    interfaces = await provider.discover_interfaces()
+
+    assert interfaces == [{"index": 1, "name": "eth0", "type": "ethernet",
+                           "speed_bps": 1_000_000_000, "oper_status": "up"}]
+    assert transport.walked == [OID_IF_DESCR, OID_IF_TYPE, OID_IF_SPEED, OID_IF_OPER_STATUS]

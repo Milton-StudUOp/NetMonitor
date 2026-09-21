@@ -4,6 +4,11 @@ Network infrastructure monitoring platform with automatic discovery, persistent 
 
 Active development is performed on the `dev` branch. Use `main` only for stable releases.
 
+The application resolves its own project directory at runtime. Examples use
+`<INSTALL_DIR>` only as a placeholder for the directory chosen during your
+installation; no source-code path is tied to a specific Linux, macOS, or
+Windows user directory.
+
 ## Features
 
 - ICMP, TCP, HTTP/HTTPS, and SNMP monitoring.
@@ -88,6 +93,19 @@ npm run dev -- --host 0.0.0.0
 ```
 
 The backend loads the project-level `.env` and optionally `backend/.env`; when both exist, the backend-specific file takes precedence. Keep one authoritative file whenever possible.
+
+### macOS
+
+Use the same Python and Node.js workflow as Linux, substituting the commands
+provided by your shell and the local `<INSTALL_DIR>`. For a persistent service,
+use `launchd`; do not use the Linux systemd templates.
+
+### Windows service deployment
+
+The PowerShell quick start above is portable. For a persistent deployment, use
+the Windows Service Control Manager or an approved service wrapper to run the
+virtual environment from the local installation directory. Do not copy a
+Linux path or use the systemd templates. See [deployment assets](deploy/README.md).
 
 ### First administrator and secure configuration
 
@@ -247,7 +265,7 @@ Every recipient field supports more than one destination. Enter email addresses,
 For a local Linux installation without Chromium packages, initialize and start the bridge with:
 
 ```bash
-cd /var/www/cln/NetMonitor/whatsapp-web
+cd <INSTALL_DIR>/whatsapp-web
 PUPPETEER_SKIP_DOWNLOAD=true npm ci
 npm run install-browser
 npm run start:qr

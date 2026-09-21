@@ -5,12 +5,12 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=netmonitor
-Group=netmonitor
-WorkingDirectory=/var/www/cln/NetMonitor/backend
+User=@SERVICE_USER@
+Group=@SERVICE_GROUP@
+WorkingDirectory=@INSTALL_DIR@/backend
 EnvironmentFile=/etc/netmonitor/api.env
 Environment=COLLECTOR_ENABLED=false
-ExecStart=/var/www/cln/NetMonitor/backend/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 5555
+ExecStart=@INSTALL_DIR@/backend/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 5555
 Restart=always
 RestartSec=5
 TimeoutStopSec=60

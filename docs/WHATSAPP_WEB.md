@@ -42,7 +42,7 @@ For Docker Compose, keep `WHATSAPP_WEB_SERVICE_URL=http://whatsapp-web:3010`; Co
 Install Node.js 20 or newer. On distributions where `chromium` is unavailable (including some Ubuntu Server installations), use the browser version managed by Puppeteer:
 
 ```bash
-cd /var/www/cln/NetMonitor/whatsapp-web
+cd <INSTALL_DIR>/whatsapp-web
 PUPPETEER_SKIP_DOWNLOAD=true npm ci
 npm run install-browser
 ```
@@ -54,7 +54,7 @@ The last command downloads Chrome for Testing into the Puppeteer cache. Puppetee
 When the project `.env` contains `WHATSAPP_WEB_SERVICE_URL` and `WHATSAPP_WEB_SERVICE_TOKEN`, start with:
 
 ```bash
-cd /var/www/cln/NetMonitor/whatsapp-web
+cd <INSTALL_DIR>/whatsapp-web
 npm run start:qr
 ```
 

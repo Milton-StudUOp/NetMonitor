@@ -5,14 +5,14 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=netmonitor
-Group=netmonitor
-WorkingDirectory=/var/www/cln/NetMonitor/backend
+User=@SERVICE_USER@
+Group=@SERVICE_GROUP@
+WorkingDirectory=@INSTALL_DIR@/backend
 # Create one distinct file per collector host, for example
 # /etc/netmonitor/collector-a.env with COLLECTOR_ID=collector-a.
 EnvironmentFile=/etc/netmonitor/collector.env
 Environment=COLLECTOR_ENABLED=true
-ExecStart=/var/www/cln/NetMonitor/backend/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 5555
+ExecStart=@INSTALL_DIR@/backend/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 5555
 Restart=always
 RestartSec=5
 TimeoutStopSec=60
