@@ -32,6 +32,7 @@ html,body,#root{background:var(--bg-dark);color:var(--text-main)}
 [data-theme="light"] .modal-shell{background:#fff}
 [data-theme="light"] .login-brand h1,[data-theme="light"] .login-card h2{color:var(--text-main)}
 [data-theme="light"] .metrics-device-card,[data-theme="light"] .metric-detail-sections section,[data-theme="light"] .metrics-device-selector button,[data-theme="light"] .capability-grid label{background:var(--bg-card);border-color:var(--border-color)}
+[data-theme="light"] .metrics-spotlight{background:linear-gradient(125deg,#eff6ff,var(--bg-card) 65%);border-color:#cbdcf8}[data-theme="light"] .metric-highlight,[data-theme="light"] .metric-tile,[data-theme="light"] .metric-detail-sections section{background:var(--surface-subtle);border-color:var(--border-color)}[data-theme="light"] .metrics-device-card:hover{background:var(--bg-card-hover)}
 [data-theme="light"] .metric-summary-card{background:#fff}
 [data-theme="light"] .user-search-bar,[data-theme="light"] .whatsapp-session,[data-theme="light"] .service-stepper>div,[data-theme="light"] .device-choice-grid button,[data-theme="light"] .connection-result>div,[data-theme="light"] .service-topology-child,[data-theme="light"] .service-config-identity>div,[data-theme="light"] .data-pagination,[data-theme="light"] .winrm-help{background:var(--surface-subtle)}
 [data-theme="light"] .service-stepper>div>span,[data-theme="light"] .discovery-preview span{background:#e2e8f0;color:var(--text-main)}

@@ -56,7 +56,7 @@ export default function App() {
             {feedback&&<div className="notice success" role="status">{feedback}</div>}
             <ErrorBoundary>
               <Routes>
-                <Route path="/" element={<Dashboard />} />
+                <Route path="/" element={<Dashboard user={user} />} />
                 <Route path="/topology" element={<Topology />} />
                 <Route path="/redundancy" element={<Redundancy user={user} />} />
                 <Route path="/alerts" element={<Suspense fallback={loadingPage}><Alerts /></Suspense>} />
@@ -66,12 +66,12 @@ export default function App() {
                 <Route path="/history" element={<Suspense fallback={loadingPage}><History /></Suspense>} />
                 <Route path="/reports" element={<Suspense fallback={loadingPage}><Reports /></Suspense>} />
                 <Route path="/discovery" element={<Discovery user={user} />} />
-                <Route path="/service-discovery" element={<Suspense fallback={loadingPage}><ServiceDiscovery user={user} /></Suspense>} />
-                <Route path="/service-monitoring" element={<Suspense fallback={loadingPage}><ServiceMonitoring /></Suspense>} />
+                <Route path="/service-discovery" element={<Suspense fallback={loadingPage}>{user.role === 'VIEWER'?<ServiceMonitoring user={user}/>:<ServiceDiscovery user={user}/>}</Suspense>} />
+                <Route path="/service-monitoring" element={<Suspense fallback={loadingPage}><ServiceMonitoring user={user} /></Suspense>} />
                 <Route path="/service-topology" element={<Suspense fallback={loadingPage}><ServiceTopology /></Suspense>} />
                 <Route path="/services/:serviceId" element={<Suspense fallback={loadingPage}><ServiceAnalytics /></Suspense>} />
-                <Route path="/metrics-monitoring" element={<MetricsMonitoring />} />
-                <Route path="/metrics-discovery" element={<Suspense fallback={loadingPage}><MetricsDiscovery /></Suspense>} />
+                <Route path="/metrics-monitoring" element={<MetricsMonitoring user={user} />} />
+                <Route path="/metrics-discovery" element={<Suspense fallback={loadingPage}>{user.role === 'VIEWER'?<MetricsMonitoring user={user}/>:<MetricsDiscovery user={user}/>}</Suspense>} />
                 <Route path="/settings" element={<PlatformSettings />} />
                 {user.role === 'ADMINISTRATOR' && <Route path="/system-health" element={<Suspense fallback={loadingPage}><SystemHealth /></Suspense>} />}
               </Routes>

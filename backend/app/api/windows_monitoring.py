@@ -13,8 +13,9 @@ from app.models.monitoring_provider import (DeviceCapability, DeviceMonitoringCr
 from app.schemas.monitoring_provider import MonitoringProfileInput, ServiceMonitoringUpdate
 from app.services.monitoring_providers import MonitoringProviderError
 from app.services.provider_factory import provider_for_device
-from app.services.metric_alerts import evaluate_metric_alerts
+from app.services.metric_alerts import evaluate_metric_alerts, resolve_disabled_metric_alerts
 from app.services.interface_metrics import enrich_interface_rates, selected_interfaces
+from app.api.access import require_operator
 
 router = APIRouter(prefix="/api", tags=["Services and metrics monitoring"])
 SERVICE_PERIOD_HOURS = {"24h": 24, "7d": 24 * 7, "30d": 24 * 30, "90d": 24 * 90}
@@ -97,7 +98,7 @@ async def monitored_services_inventory(db: AsyncSession = Depends(get_db)):
         "ip_address": devices[item.device_id].ip_address} for item in services if item.device_id in devices]
 
 
-@router.post("/devices/{device_id}/services/discover")
+@router.post("/devices/{device_id}/services/discover", dependencies=[Depends(require_operator)])
 async def discover_services(device_id: int, db: AsyncSession = Depends(get_db)):
     device = await db.get(Device, device_id)
     if not device: raise HTTPException(404, "Device not found")
@@ -140,7 +141,7 @@ async def list_services(device_id: int, search: str = "", state: str | None = No
     return [_service(x) for x in (await db.execute(query.order_by(DiscoveredService.display_name))).scalars().all()]
 
 
-@router.put("/devices/{device_id}/services/monitoring")
+@router.put("/devices/{device_id}/services/monitoring", dependencies=[Depends(require_operator)])
 async def configure_services(device_id: int, data: ServiceMonitoringUpdate, db: AsyncSession = Depends(get_db)):
     items = (await db.execute(select(DiscoveredService).where(DiscoveredService.device_id == device_id,
         DiscoveredService.id.in_(data.service_ids)))).scalars().all()
@@ -228,7 +229,7 @@ async def service_analytics(service_id: int, period: str = Query("24h"), db: Asy
             for x in reversed(records[-100:])]}
 
 
-@router.post("/devices/{device_id}/metrics/collect")
+@router.post("/devices/{device_id}/metrics/collect", dependencies=[Depends(require_operator)])
 async def collect_metrics(device_id: int, db: AsyncSession = Depends(get_db)):
     device = await db.get(Device, device_id)
     if not device: raise HTTPException(404, "Device not found")
@@ -300,7 +301,7 @@ async def metric_interfaces(device_id: int, db: AsyncSession = Depends(get_db)):
         "selected_interface_indexes": (capability.diagnostics or {}).get("selected_interface_indexes", []) if capability else []}
 
 
-@router.put("/devices/{device_id}/metrics/configuration")
+@router.put("/devices/{device_id}/metrics/configuration", dependencies=[Depends(require_operator)])
 async def configure_metrics(device_id: int, payload: dict = Body(...), db: AsyncSession = Depends(get_db)):
     device = await db.get(Device, device_id)
     if not device: raise HTTPException(404, "Device not found")
@@ -332,8 +333,9 @@ async def configure_metrics(device_id: int, payload: dict = Body(...), db: Async
         "metric_thresholds":clean_thresholds,
         "selected_interface_indexes":[int(value) for value in payload.get("selected_interface_indexes") or []],
         "metric_notifications_enabled":bool(payload.get("metric_notifications_enabled",True))}
+    resolved_alerts = await resolve_disabled_metric_alerts(db, device_id, item.diagnostics)
     await db.commit()
-    return {"device_id": device_id, "enabled_metrics": selected}
+    return {"device_id": device_id, "enabled_metrics": selected, "resolved_alerts": resolved_alerts}
 
 
 @router.get("/metrics/overview")
@@ -384,14 +386,14 @@ async def list_profiles(db: AsyncSession = Depends(get_db)):
     return (await db.execute(select(MonitoringProfile).order_by(MonitoringProfile.name))).scalars().all()
 
 
-@router.post("/monitoring-profiles", status_code=201)
+@router.post("/monitoring-profiles", status_code=201, dependencies=[Depends(require_operator)])
 async def create_profile(data: MonitoringProfileInput, db: AsyncSession = Depends(get_db)):
     if (await db.execute(select(MonitoringProfile).where(MonitoringProfile.name == data.name))).scalar_one_or_none():
         raise HTTPException(409, "A monitoring profile with this name already exists")
     item = MonitoringProfile(**data.model_dump()); db.add(item); await db.commit(); await db.refresh(item); return item
 
 
-@router.put("/monitoring-profiles/{profile_id}")
+@router.put("/monitoring-profiles/{profile_id}", dependencies=[Depends(require_operator)])
 async def update_profile(profile_id: int, data: MonitoringProfileInput, db: AsyncSession = Depends(get_db)):
     item = await db.get(MonitoringProfile, profile_id)
     if not item: raise HTTPException(404, "Monitoring profile not found")
@@ -402,7 +404,7 @@ async def update_profile(profile_id: int, data: MonitoringProfileInput, db: Asyn
     await db.commit(); await db.refresh(item); return item
 
 
-@router.delete("/monitoring-profiles/{profile_id}", status_code=204)
+@router.delete("/monitoring-profiles/{profile_id}", status_code=204, dependencies=[Depends(require_operator)])
 async def delete_profile(profile_id: int, db: AsyncSession = Depends(get_db)):
     item = await db.get(MonitoringProfile, profile_id)
     if not item: raise HTTPException(404, "Monitoring profile not found")
@@ -424,7 +426,7 @@ async def _apply_profile_to_device(db: AsyncSession, device_id: int, profile: Mo
     return len(matched)
 
 
-@router.post("/devices/{device_id}/monitoring-profiles/{profile_id}/apply")
+@router.post("/devices/{device_id}/monitoring-profiles/{profile_id}/apply", dependencies=[Depends(require_operator)])
 async def apply_profile(device_id: int, profile_id: int, db: AsyncSession = Depends(get_db)):
     profile = await db.get(MonitoringProfile, profile_id)
     if not profile or not profile.enabled: raise HTTPException(404, "Monitoring profile not found")
@@ -432,7 +434,7 @@ async def apply_profile(device_id: int, profile_id: int, db: AsyncSession = Depe
     await db.commit(); return {"profile": profile.name, "matched_services": matched}
 
 
-@router.post("/monitoring-profiles/{profile_id}/apply")
+@router.post("/monitoring-profiles/{profile_id}/apply", dependencies=[Depends(require_operator)])
 async def apply_profile_bulk(profile_id: int, payload: dict = Body(...), db: AsyncSession = Depends(get_db)):
     profile = await db.get(MonitoringProfile, profile_id)
     if not profile or not profile.enabled: raise HTTPException(404, "Monitoring profile not found")

@@ -134,8 +134,22 @@ $ErrorActionPreference='Stop'
 $os=Get-WmiObject Win32_OperatingSystem
 $cpu=(Get-WmiObject Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average
 $disks=Get-WmiObject Win32_LogicalDisk -Filter "DriveType=3" | ForEach-Object {@{name=$_.DeviceID;label=$_.VolumeName;file_system=$_.FileSystem;size_bytes=[int64]$_.Size;free_bytes=[int64]$_.FreeSpace;used_percent=if($_.Size){[math]::Round((1-($_.FreeSpace/$_.Size))*100,2)}else{0}}}
-$adapterStates=@{}; Get-WmiObject Win32_NetworkAdapter -ErrorAction SilentlyContinue | ForEach-Object {if($_.Name){$adapterStates[$_.Name]=if($_.NetConnectionStatus -eq 2){'up'}elseif($_.NetConnectionStatus -in 0,1,4,5,7){'down'}else{'unknown'}}}
-$net=Get-WmiObject Win32_PerfFormattedData_Tcpip_NetworkInterface -ErrorAction SilentlyContinue | ForEach-Object {@{name=$_.Name;status=if($adapterStates.ContainsKey($_.Name)){$adapterStates[$_.Name]}else{'unknown'};bytes_received_per_sec=[int64]$_.BytesReceivedPersec;bytes_sent_per_sec=[int64]$_.BytesSentPersec;packets_received_errors=[int64]$_.PacketsReceivedErrors;packets_outbound_errors=[int64]$_.PacketsOutboundErrors}}
+$adapterStates=@{}
+Get-WmiObject Win32_NetworkAdapter -ErrorAction SilentlyContinue | ForEach-Object {
+  $state=if($_.NetConnectionStatus -eq 2){'up'}elseif($_.NetConnectionStatus -in 0,1,4,5,6,7){'down'}else{'unknown'}
+  @($_.Name,$_.NetConnectionID,$_.Description) | Where-Object {$_} | ForEach-Object {$adapterStates[$_.ToString().ToLowerInvariant()]=$state}
+}
+if(Get-Command Get-NetAdapter -ErrorAction SilentlyContinue){
+  Get-NetAdapter -IncludeHidden -ErrorAction SilentlyContinue | ForEach-Object {
+    $state=if($_.Status -eq 'Up'){'up'}elseif($_.Status -in 'Disabled','Disconnected','Not Present','LowerLayerDown'){'down'}else{'unknown'}
+    @($_.Name,$_.InterfaceDescription) | Where-Object {$_} | ForEach-Object {$adapterStates[$_.ToString().ToLowerInvariant()]=$state}
+  }
+}
+$net=Get-WmiObject Win32_PerfFormattedData_Tcpip_NetworkInterface -ErrorAction SilentlyContinue | ForEach-Object {
+  $name=$_.Name; $lookup=$name.ToString().ToLowerInvariant(); $status=$adapterStates[$lookup]
+  if(!$status){foreach($key in $adapterStates.Keys){if($lookup.Contains($key) -or $key.Contains($lookup)){$status=$adapterStates[$key];break}}}
+  @{name=$name;status=if($status){$status}else{'unknown'};bytes_received_per_sec=[int64]$_.BytesReceivedPersec;bytes_sent_per_sec=[int64]$_.BytesSentPersec;packets_received_errors=[int64]$_.PacketsReceivedErrors;packets_outbound_errors=[int64]$_.PacketsOutboundErrors}
+}
 $adapters=Get-WmiObject Win32_NetworkAdapterConfiguration -Filter "IPEnabled=True" -ErrorAction SilentlyContinue | ForEach-Object {@{description=$_.Description;mac_address=$_.MACAddress;ip_addresses=@($_.IPAddress);gateways=@($_.DefaultIPGateway)}}
 $processes=Get-WmiObject Win32_PerfFormattedData_PerfProc_Process -ErrorAction SilentlyContinue | Where-Object {$_.Name -ne '_Total' -and $_.Name -ne 'Idle'} | Sort-Object PercentProcessorTime -Descending | Select-Object -First 20 | ForEach-Object {@{name=$_.Name;process_id=[int]$_.IDProcess;cpu_percent=[double]$_.PercentProcessorTime;working_set_bytes=[int64]$_.WorkingSetPrivate}}
 $events=Get-WmiObject Win32_NTLogEvent -Filter "Logfile='System' AND (EventType=1 OR EventType=2)" -ErrorAction SilentlyContinue | Select-Object -First 20 | ForEach-Object {@{source=$_.SourceName;event_code=[int]$_.EventCode;type=[int]$_.EventType;message=$_.Message;time_generated=$_.TimeGenerated}}

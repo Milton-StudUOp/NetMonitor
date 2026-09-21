@@ -44,3 +44,36 @@ async def evaluate_metric_alerts(db, device, values: dict, configuration: dict) 
                 active.severity=AlertSeverity(severity); active.message=message
         elif active:
             active.is_resolved=True; active.resolved_at=now
+
+
+async def resolve_disabled_metric_alerts(db, device_id: int, configuration: dict) -> int:
+    """Resolve active metric-threshold incidents removed from a device policy.
+
+    Policy updates must take effect immediately; waiting for the next collector
+    pass leaves a stale active incident visible and can be mistaken for a new
+    threshold notification.
+    """
+    thresholds = configuration.get("metric_thresholds") or {}
+    enabled_metrics = set(configuration.get("enabled_metrics") or [])
+    inactive_titles = []
+    for key, label in METRIC_LABELS.items():
+        policy = thresholds.get(key) or {}
+        if key not in enabled_metrics or not policy.get("enabled", True):
+            inactive_titles.append(f"{label} threshold on")
+
+    if not inactive_titles:
+        return 0
+
+    alerts = (await db.execute(select(Alert).where(
+        Alert.device_id == device_id,
+        Alert.root_cause == "METRIC_THRESHOLD",
+        Alert.is_resolved.is_(False),
+    ))).scalars().all()
+    now = datetime.now(timezone.utc)
+    resolved = 0
+    for alert in alerts:
+        if any(alert.title.startswith(title) for title in inactive_titles):
+            alert.is_resolved = True
+            alert.resolved_at = now
+            resolved += 1
+    return resolved

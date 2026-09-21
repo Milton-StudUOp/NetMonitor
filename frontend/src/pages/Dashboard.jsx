@@ -8,7 +8,7 @@ import { MonitoredDevicesSection } from './MetricsMonitoring';
 
 const ServiceTopology = lazy(() => import('./ServiceTopology'));
 
-export default function Dashboard() {
+export default function Dashboard({user}) {
   const [summary, setSummary] = useState(null);
   const [alerts, setAlerts] = useState([]);
   const [topology, setTopology] = useState(null);
@@ -93,7 +93,7 @@ export default function Dashboard() {
         <Suspense fallback={<div className="glass-card analytics-state">Loading service topology…</div>}><ServiceTopology embedded /></Suspense>
       </div>
       <div className="dashboard-topology-section">
-        <MonitoredDevicesSection embedded />
+        <MonitoredDevicesSection embedded canManage={user?.role !== 'VIEWER'} />
       </div>
     </div>
   );

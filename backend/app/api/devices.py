@@ -18,6 +18,7 @@ from app.security import decrypt_secret, encrypt_secret
 from app.services.windows_monitoring import WinRMTransport, WindowsMonitoringError, WindowsMonitoringProvider
 from app.services.linux_monitoring import LinuxMonitoringError, LinuxMonitoringProvider, SSHTransport
 from app.services.snmp_monitoring import SNMPMonitoringError, SNMPMonitoringProvider, SNMPSecurity, SNMPTransport
+from app.api.access import require_operator
 
 router = APIRouter(prefix="/api/devices", tags=["Devices"])
 
@@ -125,7 +126,7 @@ async def list_devices(
 
 from app.services.icmp_monitor import ping_target
 
-@router.post("", response_model=DeviceRead, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=DeviceRead, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_operator)])
 async def create_device(device_in: DeviceCreate, db: AsyncSession = Depends(get_db)):
     existing = await db.execute(select(Device).where(Device.name == device_in.name))
     if existing.scalar_one_or_none():
@@ -184,7 +185,7 @@ async def get_windows_monitoring(device_id: int, db: AsyncSession = Depends(get_
     return WindowsConnectionRead.model_validate(credential)
 
 
-@router.put("/{device_id}/windows-monitoring", response_model=WindowsConnectionRead)
+@router.put("/{device_id}/windows-monitoring", response_model=WindowsConnectionRead, dependencies=[Depends(require_operator)])
 async def configure_windows_monitoring(device_id: int, data: WindowsConnectionInput,
                                        db: AsyncSession = Depends(get_db)):
     if not await db.get(Device, device_id):
@@ -210,7 +211,7 @@ async def configure_windows_monitoring(device_id: int, data: WindowsConnectionIn
     return WindowsConnectionRead.model_validate(credential)
 
 
-@router.post("/{device_id}/windows-monitoring/test", response_model=WindowsCapabilityRead)
+@router.post("/{device_id}/windows-monitoring/test", response_model=WindowsCapabilityRead, dependencies=[Depends(require_operator)])
 async def test_windows_monitoring(device_id: int, db: AsyncSession = Depends(get_db)):
     device = await db.get(Device, device_id)
     if not device: raise HTTPException(status_code=404, detail="Device not found")
@@ -259,7 +260,7 @@ async def test_windows_monitoring(device_id: int, db: AsyncSession = Depends(get
             service_discovery=False, status="FAILED", error_code=exc.code, message=str(exc), discovered_at=now)
 
 
-@router.post("/{device_id}/windows-monitoring/test-candidate", response_model=WindowsCapabilityRead)
+@router.post("/{device_id}/windows-monitoring/test-candidate", response_model=WindowsCapabilityRead, dependencies=[Depends(require_operator)])
 async def test_windows_monitoring_candidate(device_id: int, data: WindowsConnectionInput,
                                             db: AsyncSession = Depends(get_db)):
     """Test supplied settings without persisting credentials or connection configuration."""
@@ -309,7 +310,7 @@ async def get_linux_monitoring(device_id: int, db: AsyncSession = Depends(get_db
         host_key=(capability.diagnostics or {}).get("host_key") if capability else None)
 
 
-@router.put("/{device_id}/linux-monitoring", response_model=LinuxConnectionRead)
+@router.put("/{device_id}/linux-monitoring", response_model=LinuxConnectionRead, dependencies=[Depends(require_operator)])
 async def configure_linux_monitoring(device_id: int, data: LinuxConnectionInput,
                                      db: AsyncSession = Depends(get_db)):
     if not await db.get(Device, device_id): raise HTTPException(404, "Device not found")
@@ -339,7 +340,7 @@ async def configure_linux_monitoring(device_id: int, data: LinuxConnectionInput,
         enabled=credential.enabled,secret_configured=True,host_key=data.host_key)
 
 
-@router.post("/{device_id}/linux-monitoring/test-candidate")
+@router.post("/{device_id}/linux-monitoring/test-candidate", dependencies=[Depends(require_operator)])
 async def test_linux_monitoring_candidate(device_id: int, data: LinuxConnectionInput,
                                           db: AsyncSession = Depends(get_db)):
     device=await db.get(Device,device_id)
@@ -430,7 +431,7 @@ async def get_snmp_monitoring(device_id: int, db: AsyncSession = Depends(get_db)
     return _snmp_read(credential) if credential else None
 
 
-@router.put("/{device_id}/snmp-monitoring", response_model=SNMPConnectionRead)
+@router.put("/{device_id}/snmp-monitoring", response_model=SNMPConnectionRead, dependencies=[Depends(require_operator)])
 async def configure_snmp_monitoring(device_id: int, data: SNMPConnectionInput,
                                     db: AsyncSession = Depends(get_db)):
     if not await db.get(Device, device_id): raise HTTPException(404, "Device not found")
@@ -465,7 +466,7 @@ async def configure_snmp_monitoring(device_id: int, data: SNMPConnectionInput,
     return _snmp_read(credential)
 
 
-@router.delete("/{device_id}/monitoring-integration")
+@router.delete("/{device_id}/monitoring-integration", dependencies=[Depends(require_operator)])
 async def unlink_monitoring_integration(device_id: int, db: AsyncSession = Depends(get_db)):
     if not await db.get(Device, device_id): raise HTTPException(404, "Device not found")
     credentials = (await db.execute(select(DeviceMonitoringCredential).where(
@@ -494,7 +495,7 @@ async def _test_snmp_connection(device: Device, data: SNMPConnectionInput, secre
             status="FAILED", error_code=exc.code, message=str(exc), discovered_at=now)
 
 
-@router.post("/{device_id}/snmp-monitoring/test-candidate", response_model=SNMPCapabilityRead)
+@router.post("/{device_id}/snmp-monitoring/test-candidate", response_model=SNMPCapabilityRead, dependencies=[Depends(require_operator)])
 async def test_snmp_monitoring_candidate(device_id: int, data: SNMPConnectionInput,
                                          db: AsyncSession = Depends(get_db)):
     device = await db.get(Device, device_id)
@@ -507,7 +508,7 @@ async def test_snmp_monitoring_candidate(device_id: int, data: SNMPConnectionInp
     return await _test_snmp_connection(device, data, _snmp_secret_payload(data, _decode_snmp_secret(stored)))
 
 
-@router.post("/{device_id}/snmp-monitoring/test", response_model=SNMPCapabilityRead)
+@router.post("/{device_id}/snmp-monitoring/test", response_model=SNMPCapabilityRead, dependencies=[Depends(require_operator)])
 async def test_snmp_monitoring(device_id: int, db: AsyncSession = Depends(get_db)):
     device = await db.get(Device, device_id)
     if not device: raise HTTPException(404, "Device not found")
@@ -538,7 +539,7 @@ async def test_snmp_monitoring(device_id: int, db: AsyncSession = Depends(get_db
     return result
 
 
-@router.put("/{device_id}", response_model=DeviceRead)
+@router.put("/{device_id}", response_model=DeviceRead, dependencies=[Depends(require_operator)])
 async def update_device(device_id: int, device_in: DeviceUpdate, db: AsyncSession = Depends(get_db)):
     device = await db.get(Device, device_id)
     if not device:
@@ -595,7 +596,7 @@ async def update_device(device_id: int, device_in: DeviceUpdate, db: AsyncSessio
     return device
 
 
-@router.delete("/{device_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{device_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_operator)])
 async def delete_device(device_id: int, db: AsyncSession = Depends(get_db)):
     device = await db.get(Device, device_id)
     if not device:
