@@ -77,11 +77,14 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.send_text(json.dumps({"event": "authenticated"}))
     try:
         while True:
-            # Keep connection alive & listen for client ping/messages
-            data = await websocket.receive_text()
+            # A reverse proxy or a browser can disappear without a close
+            # frame. Periodically require a client heartbeat so stale sockets
+            # cannot accumulate in the process.
+            data = await asyncio.wait_for(websocket.receive_text(), timeout=60)
             if data == "ping":
                 await websocket.send_text(json.dumps({"event": "pong"}))
-    except WebSocketDisconnect:
+    except (asyncio.TimeoutError, WebSocketDisconnect):
+        await close_if_connected(websocket, code=1001)
         manager.disconnect(websocket)
     except Exception as e:
         logger.error("ws_error", error_type=type(e).__name__)

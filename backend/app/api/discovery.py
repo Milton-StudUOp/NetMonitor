@@ -208,6 +208,8 @@ async def _execute_job(job: dict):
 def _new_job(request: DiscoveryRequest) -> dict:
     if request.scan_profile == "AGGRESSIVE" and not get_settings().ALLOW_AGGRESSIVE_DISCOVERY:
         raise HTTPException(403, "Aggressive discovery is disabled. An administrator must enable ALLOW_AGGRESSIVE_DISCOVERY.")
+    if any(item["status"] == "RUNNING" for item in _jobs.values()):
+        raise HTTPException(409, "A discovery job is already running. Wait for it to finish before starting another scan.")
     # Keep the in-memory registry bounded without interrupting active work.
     stale = sorted((item for item in _jobs.values() if item["status"] != "RUNNING"), key=lambda item: item["started_at"])
     for old_job in stale[:max(0, len(_jobs) - 99)]: _jobs.pop(old_job["id"], None)

@@ -239,6 +239,8 @@ class SystemSettingsInput(BaseModel):
     default_monitoring_interval: int = Field(default=30, ge=1)
     failure_threshold: int = Field(default=3, ge=1)
     success_threshold: int = Field(default=2, ge=1)
+    probe_concurrency: int = Field(default=100, ge=1, le=500)
+    probe_batch_size: int = Field(default=1000, ge=1, le=5000)
 
 
 class DiscoveryRequest(BaseModel):

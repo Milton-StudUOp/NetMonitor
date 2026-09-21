@@ -8,6 +8,20 @@ class WindowsMonitoringError(MonitoringProviderError):
     pass
 
 
+def classify_winrm_error(exc: Exception) -> tuple[str, str]:
+    """Return a safe, actionable classification without exposing transport details."""
+    name, message = type(exc).__name__.lower(), str(exc).lower()
+    if any(value in message for value in ("certificate verify failed", "certificate validation", "self signed certificate", "ssl: cert")):
+        return "TLS_CERTIFICATE_INVALID", "The WinRM TLS certificate is not trusted"
+    if "401" in message or "unauthorized" in message or "auth" in name:
+        return "AUTHENTICATION_FAILED", "Credentials were rejected"
+    if "403" in message or "access is denied" in message:
+        return "PERMISSION_DENIED", "The account lacks monitoring permissions"
+    if "timeout" in message:
+        return "CHECK_TIMEOUT", "Windows monitoring timed out"
+    return "WINRM_UNAVAILABLE", "Windows remote management is unavailable"
+
+
 class WinRMTransport:
     def __init__(self, host: str, username: str, password: str, port: int = 5986,
                  use_https: bool = True, verify_certificate: bool = True,
@@ -31,22 +45,17 @@ class WinRMTransport:
                 read_timeout_sec=self.timeout, operation_timeout_sec=max(5, self.timeout - 2))
             result = session.run_ps(script)
         except Exception as exc:
-            name = type(exc).__name__.lower(); message = str(exc).lower()
-            if "401" in message or "unauthorized" in message or "auth" in name:
-                code, safe = "AUTHENTICATION_FAILED", "Credentials were rejected"
-            elif "403" in message or "access is denied" in message:
-                code, safe = "PERMISSION_DENIED", "The account lacks monitoring permissions"
-            elif "timeout" in message:
-                code, safe = "CHECK_TIMEOUT", "Windows monitoring timed out"
-            else:
-                code, safe = "WINRM_UNAVAILABLE", "Windows remote management is unavailable"
+            code, safe = classify_winrm_error(exc)
             raise WindowsMonitoringError(code, safe) from exc
         if result.status_code != 0:
             raise WindowsMonitoringError("DISCOVERY_FAILED", "Windows capability discovery failed")
         return result.std_out.decode("utf-8", errors="replace").strip()
 
     async def run_powershell(self, script: str) -> str:
-        return await asyncio.wait_for(asyncio.to_thread(self._run_sync, script), self.timeout + 2)
+        try:
+            return await asyncio.wait_for(asyncio.to_thread(self._run_sync, script), self.timeout + 2)
+        except TimeoutError as exc:
+            raise WindowsMonitoringError("CHECK_TIMEOUT", "Windows monitoring timed out") from exc
 
 
 class WindowsMonitoringProvider(MonitoringProvider):

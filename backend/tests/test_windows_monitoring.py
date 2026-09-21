@@ -2,7 +2,7 @@ import pytest
 from app.api import devices as devices_api
 from app.api.devices import _reject_loopback_windows_target
 from app.models.device import Device, DeviceType
-from app.services.windows_monitoring import WindowsMonitoringError, WindowsMonitoringProvider
+from app.services.windows_monitoring import WindowsMonitoringError, WindowsMonitoringProvider, classify_winrm_error
 from app.services.windows_monitoring_engine import service_state_transition
 
 
@@ -120,3 +120,9 @@ def test_loopback_is_allowed_when_backend_runs_on_windows(monkeypatch):
     monkeypatch.setattr(devices_api.os, "name", "nt")
     device = Device(name="local", ip_address="127.0.0.1", device_type=DeviceType.SERVER, location="lab")
     _reject_loopback_windows_target(device)
+
+
+def test_winrm_certificate_error_is_classified_without_transport_details():
+    code, message = classify_winrm_error(Exception("certificate verify failed: self signed certificate"))
+    assert code == "TLS_CERTIFICATE_INVALID"
+    assert "self signed" not in message.lower()

@@ -68,6 +68,7 @@ class SSHTransport:
 class LinuxMonitoringProvider(MonitoringProvider):
     CAPABILITY_COMMAND = """sh -c 'printf "OS_BEGIN\\n"; cat /etc/os-release 2>/dev/null || true; printf "OS_END\\n"; uname -srmo; command -v systemctl || true; test -r /proc/stat && echo PROC_OK; test -r /sys/class/net && echo SYS_NET_OK; command -v df || true; command -v ip || true'"""
     METRICS_COMMAND = """sh -c 'printf "CPU1 "; head -1 /proc/stat; sleep 1; printf "CPU2 "; head -1 /proc/stat; printf "MEM_BEGIN\\n"; cat /proc/meminfo; printf "MEM_END\\nUPTIME "; cut -d" " -f1 /proc/uptime; printf "DF_BEGIN\\n"; df -P -B1 2>/dev/null; printf "DF_END\\nNET_BEGIN\\n"; for n in /sys/class/net/*; do i=${n##*/}; printf "%s|" "$i"; cat "$n/operstate" 2>/dev/null | tr "\\n" "|"; cat "$n/address" 2>/dev/null | tr "\\n" "|"; cat "$n/statistics/rx_bytes" 2>/dev/null | tr "\\n" "|"; cat "$n/statistics/tx_bytes" 2>/dev/null; done; printf "NET_END\\nSYS_BEGIN\\n"; hostname; uname -srmo; cat /etc/os-release 2>/dev/null; printf "SYS_END\\nPROC_BEGIN\\n"; ps -eo pid=,pcpu=,rss=,comm= --sort=-pcpu 2>/dev/null | head -20; printf "PROC_END\\n"'"""
+    SERVICE_DISCOVERY_COMMAND = """sh -c 'units=$(LC_ALL=C systemctl list-units --type=service --all --no-legend --plain --full 2>/dev/null | awk "{print \\$1}"); test -n "$units" || exit 0; systemctl show --no-pager --property=Id,Description,ActiveState,SubState,UnitFileState $units'"""
 
     def __init__(self, transport: SSHTransport): self.transport = transport
 
@@ -94,7 +95,10 @@ class LinuxMonitoringProvider(MonitoringProvider):
         return {key:{"supported":supported,"label":labels[key]} for key,supported in detected.capabilities.items() if key != "services"}
 
     async def discover_services(self) -> list[dict]:
-        raw = await self.transport.run("systemctl show --type=service --all --no-pager --property=Id,Description,ActiveState,SubState,UnitFileState")
+        # `systemctl show` without explicit unit names reports manager
+        # properties on several distributions. List units first, then request
+        # their normalized properties in a single remote command.
+        raw = await self.transport.run(self.SERVICE_DISCOVERY_COMMAND)
         services = []
         for block in raw.split("\n\n"):
             item = _key_values(block)

@@ -17,7 +17,7 @@ export function getApiErrorMessage(err) {
   }
 
   if (detail && typeof detail === 'object') {
-    return JSON.stringify(detail);
+    return detail.message || detail.detail || detail.code || 'The server returned an invalid error response.';
   }
 
   return detail || err.message || 'Unknown error';

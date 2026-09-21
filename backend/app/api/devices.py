@@ -255,7 +255,7 @@ async def test_windows_monitoring(device_id: int, db: AsyncSession = Depends(get
         await db.commit()
         return WindowsCapabilityRead(device_id=device.id, device_name=device.name,
             connectivity=exc.code not in {"WINRM_UNAVAILABLE", "CHECK_TIMEOUT"}, winrm=False,
-            authentication=exc.code not in {"AUTHENTICATION_FAILED", "WINRM_UNAVAILABLE", "CHECK_TIMEOUT"},
+            authentication=exc.code not in {"AUTHENTICATION_FAILED", "TLS_CERTIFICATE_INVALID", "WINRM_UNAVAILABLE", "CHECK_TIMEOUT"},
             service_discovery=False, status="FAILED", error_code=exc.code, message=str(exc), discovered_at=now)
 
 
@@ -290,7 +290,7 @@ async def test_windows_monitoring_candidate(device_id: int, data: WindowsConnect
     except WindowsMonitoringError as exc:
         return WindowsCapabilityRead(device_id=device.id, device_name=device.name,
             connectivity=exc.code not in {"WINRM_UNAVAILABLE", "CHECK_TIMEOUT"}, winrm=False,
-            authentication=exc.code not in {"AUTHENTICATION_FAILED", "WINRM_UNAVAILABLE", "CHECK_TIMEOUT"},
+            authentication=exc.code not in {"AUTHENTICATION_FAILED", "TLS_CERTIFICATE_INVALID", "WINRM_UNAVAILABLE", "CHECK_TIMEOUT"},
             service_discovery=False, status="FAILED", error_code=exc.code, message=str(exc), discovered_at=now)
 
 
@@ -404,6 +404,23 @@ def _snmp_security(data: SNMPConnectionInput, secrets: dict) -> SNMPSecurity:
         priv_key=secrets.get("priv_key"), auth_protocol=data.auth_protocol, priv_protocol=data.priv_protocol)
 
 
+def _validate_snmp_security(data: SNMPConnectionInput, secrets: dict) -> None:
+    if data.version != "3":
+        if not secrets.get("community"):
+            raise HTTPException(400, "SNMP community is required")
+        return
+    if not data.username:
+        raise HTTPException(400, "SNMPv3 username is required")
+    auth_enabled = data.auth_protocol != "NONE"
+    privacy_enabled = data.priv_protocol != "NONE"
+    if privacy_enabled and not auth_enabled:
+        raise HTTPException(422, "SNMPv3 privacy requires an authentication protocol")
+    if auth_enabled and not secrets.get("auth_key"):
+        raise HTTPException(400, "SNMPv3 authentication key is required")
+    if privacy_enabled and not secrets.get("priv_key"):
+        raise HTTPException(400, "SNMPv3 privacy key is required")
+
+
 @router.get("/{device_id}/snmp-monitoring", response_model=SNMPConnectionRead | None)
 async def get_snmp_monitoring(device_id: int, db: AsyncSession = Depends(get_db)):
     if not await db.get(Device, device_id): raise HTTPException(404, "Device not found")
@@ -418,18 +435,15 @@ async def configure_snmp_monitoring(device_id: int, data: SNMPConnectionInput,
                                     db: AsyncSession = Depends(get_db)):
     if not await db.get(Device, device_id): raise HTTPException(404, "Device not found")
     if data.enabled: await _assert_provider_can_be_enabled(db, device_id, "SNMP")
-    if data.version == "3" and not data.username:
-        raise HTTPException(400, "SNMPv3 username is required")
     credential = (await db.execute(select(DeviceMonitoringCredential).where(
         DeviceMonitoringCredential.device_id == device_id,
         DeviceMonitoringCredential.provider == "SNMP"))).scalar_one_or_none()
     existing_secrets = _decode_snmp_secret(credential)
     secrets = _snmp_secret_payload(data, existing_secrets)
-    secret = secrets.get("auth_key") if data.version == "3" else secrets.get("community")
+    _validate_snmp_security(data, secrets)
     if not credential:
-        if not secret: raise HTTPException(400, "SNMP secret is required for the first configuration")
         credential = DeviceMonitoringCredential(device_id=device_id, provider="SNMP",
-            username=data.username or "", encrypted_password=encrypt_secret(secret), port=data.port)
+            username=data.username or "", encrypted_password=encrypt_secret(json.dumps(secrets)), port=data.port)
         db.add(credential)
     credential.username = data.username or ""
     credential.port = data.port
@@ -437,7 +451,7 @@ async def configure_snmp_monitoring(device_id: int, data: SNMPConnectionInput,
     credential.verify_certificate = False
     credential.authentication = "SNMP_V3" if data.version == "3" else "COMMUNITY"
     credential.enabled = data.enabled
-    if secret: credential.encrypted_password = encrypt_secret(json.dumps(secrets))
+    credential.encrypted_password = encrypt_secret(json.dumps(secrets))
     credential.configuration = {"version": data.version, "auth_protocol": data.auth_protocol,
         "priv_protocol": data.priv_protocol, "privacy_configured": bool(secrets.get("priv_key"))}
     capability = (await db.execute(select(DeviceCapability).where(
@@ -464,8 +478,7 @@ async def unlink_monitoring_integration(device_id: int, db: AsyncSession = Depen
 
 
 async def _test_snmp_connection(device: Device, data: SNMPConnectionInput, secrets: dict) -> SNMPCapabilityRead:
-    if not (secrets.get("auth_key") if data.version == "3" else secrets.get("community")):
-        raise HTTPException(400, "SNMP secret is required to test this connection")
+    _validate_snmp_security(data, secrets)
     provider = SNMPMonitoringProvider(SNMPTransport(device.ip_address, _snmp_security(data, secrets), data.port))
     now = datetime.now(timezone.utc)
     try:

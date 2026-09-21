@@ -12,6 +12,23 @@ uvicorn app.main:app --host 0.0.0.0 --port 5555
 
 Use `--reload` only during development. For an internet-facing deployment, place the frontend and API behind HTTPS, restrict firewall access, and use a supervised production ASGI process.
 
+Do not run `--reload` on the production server. It starts a second watcher
+process and makes recovery from transient socket failures less predictable. If
+the log reports `Too many open files`, stop all Uvicorn instances, verify that
+only one backend process remains, then restart without `--reload`:
+
+```bash
+pkill -f 'uvicorn app.main:app'
+cd /var/www/cln/NetMonitor/backend
+source venv/bin/activate
+uvicorn app.main:app --host 0.0.0.0 --port 5555
+```
+
+For a persistent deployment, use a systemd service with `LimitNOFILE=65536`.
+The application also keeps MySQL connections, background discovery work, and
+WebSocket sessions bounded; increasing OS limits must not substitute for
+correct connection lifecycle management.
+
 The development frontend listens on port 3389 and proxies `/api` and `/ws` to `127.0.0.1:5555`. If Vite reports `ECONNREFUSED 127.0.0.1:5555`, verify that the backend is listening on port 5555. If a hot-reload module unexpectedly returns an empty response, restart Vite once with `npm run dev -- --host 0.0.0.0 --port 3389 --force`.
 
 Basic availability:
@@ -21,6 +38,30 @@ curl http://127.0.0.1:5555/health
 ```
 
 The public health endpoint reports process availability only. Authenticated administrators should use **System Health** for database latency, monitoring-cycle status, storage, counters, discovery activity, sessions, notifications, and WebSocket connections.
+
+## Capacity baseline: 1,000 devices
+
+NetMonitor uses a bounded local collector. ICMP probes run concurrently only
+up to **Probe concurrency**, and each cycle accepts only **Probe batch size**
+devices. Both values are configurable in **Settings → General** and can be
+seeded through `MONITORING_PROBE_CONCURRENCY` and
+`MONITORING_PROBE_BATCH_SIZE` in `.env`. The scheduler persists each device's
+last probe time, so restarting the backend does not deliberately re-probe the
+whole inventory in one burst.
+
+For a first 1,000-device deployment, set a per-device interval appropriate to
+the network (30–60 seconds is a sensible initial range), keep batch size at or
+above the inventory size, and begin with the configured concurrency of 100.
+Increase it only after measuring collector CPU, open file descriptors, database
+latency, cycle duration, and deferred probes in **System Health**. A non-zero
+`deferred_device_probe_count` means the collector cannot service all due
+devices within its current batch capacity.
+
+This is a single-collector capacity baseline, not a promise of high
+availability. Run one backend collector process only; multiple ASGI workers
+would otherwise start duplicate in-process collectors. For redundant or larger
+deployments, separate the collector from the API and introduce durable
+distributed scheduling before adding a second collector.
 
 ## Alert severity and delivery checks
 

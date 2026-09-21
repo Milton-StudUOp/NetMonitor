@@ -41,6 +41,9 @@ class DeviceCapability(Base):
     last_status: Mapped[str] = mapped_column(String(32), default="UNTESTED")
     last_error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     discovered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Durable cadence marker for expensive remote metric collection. Unlike an
+    # in-memory timer it survives restarts and prevents collection storms.
+    last_metric_collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
 
 
 class DiscoveredService(Base):

@@ -1,6 +1,6 @@
 from sqlalchemy import inspect
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 7
 
 
 async def ensure_runtime_schema(engine) -> None:
@@ -97,6 +97,14 @@ async def ensure_runtime_schema(engine) -> None:
             await conn.exec_driver_sql(_add_column_sql(dialect, "devices", "icon_id", "INTEGER"))
         if "monitoring_method" not in device_columns:
             await conn.exec_driver_sql(_add_column_sql(dialect, "devices", "monitoring_method", "VARCHAR(24) DEFAULT 'ICMP'"))
+        if "last_monitored_at" not in device_columns:
+            timestamp_type = "DATETIME2 NULL" if dialect == "mssql" else "TIMESTAMP NULL"
+            await conn.exec_driver_sql(_add_column_sql(dialect, "devices", "last_monitored_at", timestamp_type))
+        device_indexes = await conn.run_sync(
+            lambda sync_conn: {index["name"] for index in inspect(sync_conn).get_indexes("devices")}
+        )
+        if "ix_devices_last_monitored_at" not in device_indexes:
+            await conn.exec_driver_sql("CREATE INDEX ix_devices_last_monitored_at ON devices (last_monitored_at)")
 
         alert_columns = await conn.run_sync(
             lambda sync_conn: {col["name"] for col in inspect(sync_conn).get_columns("alerts")}
@@ -109,12 +117,11 @@ async def ensure_runtime_schema(engine) -> None:
         if "acknowledgement_note" not in alert_columns:
             await conn.exec_driver_sql(_add_column_sql(dialect, "alerts", "acknowledgement_note", "TEXT NULL"))
 
-        credential_columns = await conn.run_sync(
-            lambda sync_conn: {col["name"] for col in inspect(sync_conn).get_columns("device_monitoring_credentials")}
-        )
-        if "configuration" not in credential_columns:
-            json_type = "JSONB" if dialect == "postgresql" else "TEXT"
-            await conn.exec_driver_sql(_add_column_sql(dialect, "device_monitoring_credentials", "configuration", json_type))
+        # These tables are created by SQLAlchemy for new installations.  The
+        # compatibility migration below brings databases created by older
+        # releases to the same contract, so a database switch cannot leave
+        # WinRM, SSH, SNMP, service discovery, or metric collection unusable.
+        await _ensure_monitoring_provider_schema(conn, dialect)
 
         redundancy_columns = await conn.run_sync(
             lambda sync_conn: inspect(sync_conn).get_columns("redundancy_groups")
@@ -185,6 +192,87 @@ def _drop_index_sql(dialect: str, index_name: str, table_name: str) -> str:
     if dialect in {"mysql", "mariadb", "mssql"}:
         return f"DROP INDEX {index_name} ON {table_name}"
     return f"DROP INDEX {index_name}"
+
+
+async def _ensure_monitoring_provider_schema(conn, dialect: str) -> None:
+    json_type = "JSONB" if dialect == "postgresql" else "TEXT"
+    timestamp_type = "DATETIME2 NULL" if dialect == "mssql" else "TIMESTAMP NULL"
+    boolean_type = "BIT" if dialect == "mssql" else ("NUMBER(1)" if dialect == "oracle" else "BOOLEAN")
+    table_columns = await conn.run_sync(
+        lambda sync_conn: {
+            table: {column["name"] for column in inspect(sync_conn).get_columns(table)}
+            for table in (
+                "device_monitoring_credentials", "device_capabilities", "discovered_services",
+                "service_check_history", "system_metric_snapshots", "monitoring_profiles",
+            )
+            if inspect(sync_conn).has_table(table)
+        }
+    )
+    expected = {
+        "device_monitoring_credentials": {
+            "provider": "VARCHAR(32)", "username": "VARCHAR(256)", "encrypted_password": "TEXT",
+            "port": "INTEGER", "use_https": boolean_type, "verify_certificate": boolean_type,
+            "authentication": "VARCHAR(24)", "configuration": json_type, "enabled": boolean_type,
+            "updated_at": timestamp_type,
+        },
+        "device_capabilities": {
+            "provider": "VARCHAR(32)", "platform": "VARCHAR(32)", "provider_mode": "VARCHAR(32)",
+            "operating_system": "VARCHAR(256)", "powershell_version": "VARCHAR(64)",
+            "capabilities": json_type, "diagnostics": json_type, "last_status": "VARCHAR(32)",
+            "last_error_code": "VARCHAR(64)", "discovered_at": timestamp_type,
+            "last_metric_collected_at": timestamp_type,
+        },
+        "discovered_services": {
+            "display_name": "VARCHAR(512)", "description": "TEXT", "service_account": "VARCHAR(256)",
+            "state": "VARCHAR(32)", "start_mode": "VARCHAR(32)", "monitoring_provider": "VARCHAR(32)",
+            "monitored": boolean_type, "expected_state": "VARCHAR(16)", "check_interval": "INTEGER",
+            "failure_threshold": "INTEGER", "recovery_threshold": "INTEGER", "severity": "VARCHAR(24)",
+            "notifications_enabled": boolean_type, "monitor_state": "VARCHAR(24)",
+            "consecutive_failures": "INTEGER", "consecutive_successes": "INTEGER",
+            "next_check_at": timestamp_type, "last_checked_at": timestamp_type,
+            "last_discovered_at": timestamp_type,
+        },
+        "service_check_history": {
+            "observed_state": "VARCHAR(32)", "monitor_state": "VARCHAR(24)",
+            "error_code": "VARCHAR(64)", "response_ms": "DOUBLE PRECISION" if dialect == "postgresql" else "FLOAT",
+            "checked_at": timestamp_type,
+        },
+        "system_metric_snapshots": {
+            "cpu_percent": "DOUBLE PRECISION" if dialect == "postgresql" else "FLOAT",
+            "memory_percent": "DOUBLE PRECISION" if dialect == "postgresql" else "FLOAT",
+            "uptime_seconds": "INTEGER", "storage": json_type, "collected_at": timestamp_type,
+        },
+        "monitoring_profiles": {
+            "description": "TEXT", "service_patterns": json_type, "metric_config": json_type,
+            "defaults": json_type, "enabled": boolean_type,
+        },
+    }
+    for table, columns in expected.items():
+        existing = table_columns.get(table)
+        if existing is None:
+            continue
+        for column, column_type in columns.items():
+            if column not in existing:
+                await conn.exec_driver_sql(_add_column_sql(dialect, table, column, column_type))
+
+    if "system_metric_snapshots" in table_columns:
+        metric_indexes = await conn.run_sync(
+            lambda sync_conn: {index["name"] for index in inspect(sync_conn).get_indexes("system_metric_snapshots")}
+        )
+        if "ix_system_metric_snapshot_device_time" not in metric_indexes:
+            await conn.exec_driver_sql(
+                "CREATE INDEX ix_system_metric_snapshot_device_time "
+                "ON system_metric_snapshots (device_id, collected_at)"
+            )
+    if "device_capabilities" in table_columns:
+        capability_indexes = await conn.run_sync(
+            lambda sync_conn: {index["name"] for index in inspect(sync_conn).get_indexes("device_capabilities")}
+        )
+        if "ix_device_capabilities_last_metric_collected_at" not in capability_indexes:
+            await conn.exec_driver_sql(
+                "CREATE INDEX ix_device_capabilities_last_metric_collected_at "
+                "ON device_capabilities (last_metric_collected_at)"
+            )
 
 
 async def _upgrade_sqlite_redundancy_groups(conn, columns: dict) -> None:

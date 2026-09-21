@@ -19,7 +19,17 @@ def _create_engine(url: str):
     if url.startswith("sqlite"):
         kwargs["connect_args"] = {"check_same_thread": False, "timeout": 30.0}
     else:
-        kwargs.update({"pool_pre_ping": True, "pool_size": 10, "max_overflow": 20})
+        # The backend runs several independent monitor loops. Keep the pool
+        # intentionally small and bounded so a failed remote integration or a
+        # development reload cannot exhaust process file descriptors or the
+        # MySQL connection budget.
+        kwargs.update({
+            "pool_pre_ping": True,
+            "pool_size": 5,
+            "max_overflow": 5,
+            "pool_timeout": 15,
+            "pool_recycle": 1800,
+        })
         if url.startswith("mysql"):
             kwargs["connect_args"] = {"init_command": "SET time_zone = '+00:00'"}
         elif url.startswith("postgresql"):

@@ -103,6 +103,8 @@ async def discover_services(device_id: int, db: AsyncSession = Depends(get_db)):
     if not device: raise HTTPException(404, "Device not found")
     if device.status != DeviceStatus.ONLINE: raise HTTPException(409, "Device must be online before discovery")
     provider, provider_name = await _provider(db, device)
+    if provider_name == "SNMP":
+        raise HTTPException(409, "SNMP provides metrics only; use Metrics Discovery for this device")
     try: discovered = await provider.discover_services()
     except MonitoringProviderError as exc: raise HTTPException(409, {"code": exc.code, "message": str(exc)}) from exc
     inventory = (await db.execute(select(DiscoveredService).where(
@@ -258,6 +260,8 @@ async def collect_metrics(device_id: int, db: AsyncSession = Depends(get_db)):
 
 @router.get("/devices/{device_id}/metrics")
 async def list_metrics(device_id: int, limit: int = Query(100, ge=1, le=1000), db: AsyncSession = Depends(get_db)):
+    if not await db.get(Device, device_id):
+        raise HTTPException(404, "Device not found")
     rows = (await db.execute(select(SystemMetricSnapshot).where(SystemMetricSnapshot.device_id == device_id)
         .order_by(SystemMetricSnapshot.collected_at.desc()).limit(limit))).scalars().all()
     return [_metric_snapshot(x) for x in rows]
@@ -311,9 +315,14 @@ async def configure_metrics(device_id: int, payload: dict = Body(...), db: Async
     clean_thresholds = {}
     for key in ("cpu","memory","storage"):
         policy = thresholds.get(key) or {}; warning=policy.get("warning"); critical=policy.get("critical")
-        if warning is not None and not 0 <= float(warning) <= 100: raise HTTPException(400,f"Invalid {key} warning threshold")
-        if critical is not None and not 0 <= float(critical) <= 100: raise HTTPException(400,f"Invalid {key} critical threshold")
-        if warning is not None and critical is not None and float(warning) >= float(critical):
+        try:
+            warning = None if warning is None else float(warning)
+            critical = None if critical is None else float(critical)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(422, f"{key.capitalize()} thresholds must be numeric") from exc
+        if warning is not None and not 0 <= warning <= 100: raise HTTPException(400,f"Invalid {key} warning threshold")
+        if critical is not None and not 0 <= critical <= 100: raise HTTPException(400,f"Invalid {key} critical threshold")
+        if warning is not None and critical is not None and warning >= critical:
             raise HTTPException(400,f"{key} warning threshold must be below critical threshold")
         clean_thresholds[key]={"enabled":bool(policy.get("enabled",True)),"warning":warning,"critical":critical}
     item.diagnostics = {**(item.diagnostics or {}), "enabled_metrics": selected,
@@ -326,12 +335,16 @@ async def configure_metrics(device_id: int, payload: dict = Body(...), db: Async
 
 @router.get("/metrics/overview")
 async def metrics_overview(db: AsyncSession = Depends(get_db)):
-    active_providers = {(item.device_id,item.provider) for item in (await db.execute(
-        select(DeviceMonitoringCredential).where(DeviceMonitoringCredential.enabled.is_(True))
-    )).scalars().all()}
-    configured = (await db.execute(select(DeviceCapability))).scalars().all()
-    active_capabilities = {item.device_id:item for item in configured
-        if (item.device_id,item.provider) in active_providers and (item.diagnostics or {}).get("enabled_metrics")}
+    configured = (await db.execute(select(DeviceCapability).join(
+        DeviceMonitoringCredential,
+        (DeviceMonitoringCredential.device_id == DeviceCapability.device_id)
+        & (DeviceMonitoringCredential.provider == DeviceCapability.provider)
+        & DeviceMonitoringCredential.enabled.is_(True),
+    ).order_by(DeviceCapability.discovered_at.desc(), DeviceCapability.id.desc()))).scalars().all()
+    active_capabilities = {}
+    for item in configured:
+        if (item.diagnostics or {}).get("enabled_metrics") and item.device_id not in active_capabilities:
+            active_capabilities[item.device_id] = item
     active_device_ids = set(active_capabilities)
     devices = (await db.execute(select(Device).where(Device.id.in_(active_device_ids)).order_by(Device.name))).scalars().all() if active_device_ids else []
     result = []

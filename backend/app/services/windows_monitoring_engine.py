@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from time import perf_counter
 
 import structlog
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 
 from app.database import async_session_factory
 from app.models.alert import Alert, AlertSeverity
@@ -53,66 +53,149 @@ class WindowsMonitoringEngine:
 
     async def run_due_checks(self):
         now = datetime.now(timezone.utc)
+        metric_due_before = now - timedelta(seconds=60)
         async with async_session_factory() as db:
             service_device_ids = (await db.execute(select(DiscoveredService.device_id).where(
                 DiscoveredService.monitored.is_(True), or_(DiscoveredService.next_check_at.is_(None),
                 DiscoveredService.next_check_at <= now)).distinct())).scalars().all()
-            metric_device_ids = (await db.execute(select(DeviceCapability.device_id))).scalars().all()
+            active_metric_capabilities = (await db.execute(select(DeviceCapability).join(
+                DeviceMonitoringCredential,
+                and_(DeviceMonitoringCredential.device_id == DeviceCapability.device_id,
+                     DeviceMonitoringCredential.provider == DeviceCapability.provider,
+                     DeviceMonitoringCredential.enabled.is_(True)),
+            ))).scalars().all()
+            metric_device_ids = [item.device_id for item in active_metric_capabilities
+                                 if (item.diagnostics or {}).get("enabled_metrics") and self._metric_is_due(item, metric_due_before)]
         device_ids = set(service_device_ids)
         device_ids.update(metric_device_ids)
         await asyncio.gather(*(self._check_device(device_id, now) for device_id in device_ids))
 
+    @staticmethod
+    def _metric_is_due(capability: DeviceCapability, due_before: datetime) -> bool:
+        last_collected = capability.last_metric_collected_at
+        if last_collected is None:
+            return True
+        if last_collected.tzinfo is None:
+            last_collected = last_collected.replace(tzinfo=timezone.utc)
+        return last_collected <= due_before
+
     async def _check_device(self, device_id: int, now: datetime):
-        async with self._semaphore, async_session_factory() as db:
+        # Build the transport while a short-lived database session is open,
+        # then release that session before SSH, SNMP, or WinRM performs any
+        # network I/O. A slow remote host must consume a collector slot, not a
+        # database connection from the API pool.
+        async with self._semaphore:
+            context = await self._load_check_context(device_id, now)
+            if context is None:
+                return
+            (device, services, diagnostics, capability_provider, provider, provider_name, enabled_metrics,
+             metric_due, previous_storage, previous_collected_at) = context
+            started = perf_counter()
+            try:
+                observed = await provider.check_services([item.name for item in services])
+                elapsed = round((perf_counter() - started) * 1000, 2)
+                values = await provider.collect_system_metrics() if metric_due else None
+            except (MonitoringProviderError, asyncio.TimeoutError) as exc:
+                code = exc.code if isinstance(exc, MonitoringProviderError) else "CHECK_TIMEOUT"
+                await self._persist_remote_error(services, code, now)
+                return
+            await self._persist_check_result(
+                device.id, services, diagnostics or {}, capability_provider, provider_name,
+                enabled_metrics, observed, elapsed, values, previous_storage,
+                previous_collected_at, now,
+            )
+
+    async def _load_check_context(self, device_id: int, now: datetime):
+        async with async_session_factory() as db:
             device = await db.get(Device, device_id)
-            if not device or device.status != DeviceStatus.ONLINE: return
+            if not device or device.status != DeviceStatus.ONLINE:
+                return None
             services = (await db.execute(select(DiscoveredService).where(DiscoveredService.device_id == device_id,
                 DiscoveredService.monitored.is_(True), or_(DiscoveredService.next_check_at.is_(None),
                 DiscoveredService.next_check_at <= now)))).scalars().all()
-            capabilities = (await db.execute(select(DeviceCapability).where(
-                DeviceCapability.device_id == device_id))).scalars().all()
+            capabilities = (await db.execute(select(DeviceCapability).join(
+                DeviceMonitoringCredential,
+                and_(DeviceMonitoringCredential.device_id == DeviceCapability.device_id,
+                     DeviceMonitoringCredential.provider == DeviceCapability.provider,
+                     DeviceMonitoringCredential.enabled.is_(True)),
+            ).where(DeviceCapability.device_id == device_id).order_by(
+                DeviceCapability.discovered_at.desc(), DeviceCapability.id.desc()))).scalars().all()
             capability = next((item for item in capabilities if (item.diagnostics or {}).get("enabled_metrics")), None)
             enabled_metrics = (capability.diagnostics or {}).get("enabled_metrics", []) if capability else []
-            if not services and not enabled_metrics: return
-            try: provider, provider_name = await provider_for_device(db, device, capability.provider if capability else None)
-            except MonitoringProviderError: return
-            services = [item for item in services if item.monitoring_provider == provider_name.lower()]
-            started = perf_counter()
+            if not services and not enabled_metrics:
+                return None
             try:
-                observed = await provider.check_services([x.name for x in services])
-                elapsed = round((perf_counter() - started) * 1000, 2)
-                for item in services: await self._apply_service_result(
+                provider, provider_name = await provider_for_device(db, device, capability.provider if capability else None)
+            except MonitoringProviderError:
+                return None
+            services = [item for item in services if item.monitoring_provider == provider_name.lower()]
+            last_metric = capability.last_metric_collected_at if capability else None
+            if last_metric and last_metric.tzinfo is None:
+                last_metric = last_metric.replace(tzinfo=timezone.utc)
+            metric_due = bool(enabled_metrics) and (not last_metric or now - last_metric >= timedelta(seconds=60))
+            previous_storage = None
+            previous_collected_at = None
+            if metric_due:
+                previous = (await db.execute(select(SystemMetricSnapshot).where(
+                    SystemMetricSnapshot.device_id == device_id).order_by(
+                    SystemMetricSnapshot.collected_at.desc()).limit(1))).scalar_one_or_none()
+                previous_storage = previous.storage if previous else None
+                previous_collected_at = previous.collected_at if previous else None
+            return (device, services, capability.diagnostics if capability else {}, capability.provider if capability else None,
+                    provider, provider_name, enabled_metrics,
+                    metric_due, previous_storage, previous_collected_at)
+
+    async def _persist_remote_error(self, services, code: str, now: datetime):
+        if not services:
+            return
+        service_ids = [item.id for item in services]
+        async with async_session_factory() as db:
+            current = (await db.execute(select(DiscoveredService).where(
+                DiscoveredService.id.in_(service_ids)))).scalars().all()
+            for item in current:
+                db.add(ServiceCheckHistory(service_id=item.id, observed_state="unknown", monitor_state="UNKNOWN",
+                    error_code=code, response_ms=None, checked_at=now))
+                item.last_checked_at = now
+                item.next_check_at = now + timedelta(seconds=max(300, item.check_interval))
+            await db.commit()
+
+    async def _persist_check_result(self, device_id, services, diagnostics, capability_provider, provider_name, enabled_metrics,
+                                    observed, elapsed, values, previous_storage, previous_collected_at, now):
+        service_ids = [item.id for item in services]
+        async with async_session_factory() as db:
+            device = await db.get(Device, device_id)
+            if not device:
+                return
+            current_services = (await db.execute(select(DiscoveredService).where(
+                DiscoveredService.id.in_(service_ids)))).scalars().all() if service_ids else []
+            for item in current_services:
+                await self._apply_service_result(
                     db, item, observed.get(item.name, "unknown"), None, elapsed, now, device.name)
-                last_metric = self._last_metric_check.get(device_id)
-                if enabled_metrics and (not last_metric or now - last_metric >= timedelta(seconds=60)):
-                    values = await provider.collect_system_metrics()
-                    allowed = set(enabled_metrics)
-                    previous = (await db.execute(select(SystemMetricSnapshot).where(
-                        SystemMetricSnapshot.device_id == device_id).order_by(
-                        SystemMetricSnapshot.collected_at.desc()).limit(1))).scalar_one_or_none()
-                    raw_interfaces = selected_interfaces(values.get("network_interfaces"),
-                        (capability.diagnostics or {}).get("selected_interface_indexes"))
-                    values["network_interfaces"] = enrich_interface_rates(raw_interfaces,
-                        ((previous.storage or {}).get("network_interfaces") if previous else []), now,
-                        previous.collected_at if previous else None)
-                    values["network_adapters"] = values["network_interfaces"]
-                    details = {key: values.get(key) for key in ("network_interfaces", "network_adapters",
-                        "processes", "system_information", "events")}
-                    db.add(SystemMetricSnapshot(device_id=device_id,
-                        cpu_percent=values.get("cpu_percent") if "cpu" in allowed else None,
-                        memory_percent=values.get("memory_percent") if "memory" in allowed else None,
-                        uptime_seconds=values.get("uptime_seconds") if "uptime" in allowed else None,
-                        storage={"disks": values.get("storage") or [] if "storage" in allowed else [],
-                            **{key: value if key in allowed or (key == "network_adapters" and "network_interfaces" in allowed) else []
-                               for key, value in details.items()}}))
-                    await evaluate_metric_alerts(db,device,values,capability.diagnostics or {})
-                    self._last_metric_check[device_id] = now
-            except (MonitoringProviderError, asyncio.TimeoutError) as exc:
-                code = exc.code if isinstance(exc, MonitoringProviderError) else "CHECK_TIMEOUT"
-                for item in services:
-                    db.add(ServiceCheckHistory(service_id=item.id, observed_state="unknown", monitor_state="UNKNOWN",
-                        error_code=code, response_ms=None, checked_at=now))
-                    item.last_checked_at = now; item.next_check_at = now + timedelta(seconds=max(300, item.check_interval))
+            if values is not None:
+                allowed = set(enabled_metrics)
+                raw_interfaces = selected_interfaces(values.get("network_interfaces"),
+                    diagnostics.get("selected_interface_indexes"))
+                values["network_interfaces"] = enrich_interface_rates(raw_interfaces,
+                    ((previous_storage or {}).get("network_interfaces") or []), now, previous_collected_at)
+                values["network_adapters"] = values["network_interfaces"]
+                details = {key: values.get(key) for key in ("network_interfaces", "network_adapters",
+                    "processes", "system_information", "events")}
+                db.add(SystemMetricSnapshot(device_id=device_id,
+                    cpu_percent=values.get("cpu_percent") if "cpu" in allowed else None,
+                    memory_percent=values.get("memory_percent") if "memory" in allowed else None,
+                    uptime_seconds=values.get("uptime_seconds") if "uptime" in allowed else None,
+                    storage={"disks": values.get("storage") or [] if "storage" in allowed else [],
+                        **{key: value if key in allowed or (key == "network_adapters" and "network_interfaces" in allowed) else []
+                           for key, value in details.items()}}))
+                await evaluate_metric_alerts(db, device, values, diagnostics)
+                self._last_metric_check[device_id] = now
+                if capability_provider:
+                    capability = (await db.execute(select(DeviceCapability).where(
+                        DeviceCapability.device_id == device_id,
+                        DeviceCapability.provider == capability_provider,
+                    ))).scalar_one_or_none()
+                    if capability:
+                        capability.last_metric_collected_at = now
             await db.commit()
 
     async def _apply_service_result(self, db, item, observed: str, error_code: str | None,

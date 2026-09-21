@@ -51,6 +51,10 @@ class Device(Base):
     snmp_port: Mapped[int] = mapped_column(Integer, default=161)
     is_critical: Mapped[bool] = mapped_column(Boolean, default=False)
     monitoring_interval: Mapped[int] = mapped_column(Integer, default=30)
+    # A durable schedule marker.  Keeping this in the database prevents a
+    # restart from probing the entire estate at once and makes per-device
+    # intervals effective across process restarts.
+    last_monitored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     status: Mapped[DeviceStatus] = mapped_column(
         Enum(DeviceStatus), default=DeviceStatus.UNKNOWN, nullable=False
     )

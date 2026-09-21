@@ -73,3 +73,21 @@ async def test_snmp_collects_network_storage_and_uptime():
     assert result["network_interfaces"][0]["name"] == "eth0"
     assert result["network_interfaces"][0]["oper_status"] == "up"
     assert result["storage"][0]["used_percent"] == 25
+
+
+@pytest.mark.asyncio
+async def test_snmp_keeps_available_metrics_when_optional_oids_are_missing():
+    class PartialTransport(FakeSNMPTransport):
+        async def walk(self, oid, limit=500):
+            if oid in {OID_HR_STORAGE_DESCR, OID_HR_STORAGE_ALLOCATION_UNITS, OID_HR_STORAGE_SIZE, OID_HR_STORAGE_USED}:
+                from app.services.snmp_monitoring import SNMPMonitoringError
+                raise SNMPMonitoringError("SNMP_WALK_FAILED", "No such object")
+            return await super().walk(oid, limit)
+
+    provider = SNMPMonitoringProvider(PartialTransport())
+
+    result = await provider.collect_system_metrics()
+
+    assert result["uptime_seconds"] == 123
+    assert result["network_interfaces"][0]["name"] == "eth0"
+    assert result["storage"] == []

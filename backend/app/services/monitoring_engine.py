@@ -19,6 +19,7 @@ from app.services.alert_engine import trigger_alert, auto_resolve_alerts
 from app.api.websocket import manager as ws_manager
 from app.models.platform import SystemSetting
 from app.models.alert import Alert
+from app.config import get_settings
 
 logger = structlog.get_logger()
 
@@ -43,6 +44,8 @@ class MonitoringEngine:
         self._maintenance_task: asyncio.Task | None = None
         self._latest_device_probes: dict[int, dict] = {}
         self._cycle_interval = 5
+        self._probe_concurrency = get_settings().MONITORING_PROBE_CONCURRENCY
+        self._probe_batch_size = get_settings().MONITORING_PROBE_BATCH_SIZE
         self._retention_days = 90
         self._aggregate_retention_days = 1825
         self._last_retention_cleanup: datetime | None = None
@@ -52,19 +55,26 @@ class MonitoringEngine:
         self.last_cycle_error: str | None = None
         self.completed_cycles = 0
         self.failed_cycles = 0
+        self.last_device_probe_count = 0
+        self.last_deferred_device_probe_count = 0
 
     async def load_configuration(self):
         async with async_session_factory() as db:
             setting = await db.get(SystemSetting, "general")
             values = setting.value if setting else {}
             self._cycle_interval = max(1, min(int(values.get("default_monitoring_interval", 5)), 60))
+            self._probe_concurrency = max(1, min(int(values.get(
+                "probe_concurrency", get_settings().MONITORING_PROBE_CONCURRENCY)), 500))
+            self._probe_batch_size = max(1, min(int(values.get(
+                "probe_batch_size", get_settings().MONITORING_PROBE_BATCH_SIZE)), 5000))
             self._retention_days = max(1, int(values.get("retention_days", 90)))
             self._aggregate_retention_days = max(self._retention_days, int(values.get("aggregate_retention_days", 1825)))
             state_tracker.failures_to_down = max(1, int(values.get("failure_threshold", state_tracker.failures_to_down)))
             state_tracker.successes_to_up = max(1, int(values.get("success_threshold", state_tracker.successes_to_up)))
             logger.info("monitoring_configuration_loaded", cycle_interval=self._cycle_interval,
                 retention_days=self._retention_days, failures_to_down=state_tracker.failures_to_down,
-                successes_to_up=state_tracker.successes_to_up)
+                successes_to_up=state_tracker.successes_to_up, probe_concurrency=self._probe_concurrency,
+                probe_batch_size=self._probe_batch_size)
 
     def start(self):
         if not self._running:
@@ -107,8 +117,10 @@ class MonitoringEngine:
                 self.last_cycle_error = type(e).__name__; self.failed_cycles += 1
                 logger.error("monitoring_engine_loop_error", error_type=type(e).__name__)
 
-            # Run cycle every 5 seconds
-            await asyncio.sleep(self._cycle_interval)
+            # Keep the configured cadence measured from the start of the
+            # preceding cycle. A slow cycle must not add a second full delay.
+            elapsed = (datetime.now(timezone.utc) - self.last_cycle_started_at).total_seconds()
+            await asyncio.sleep(max(0, self._cycle_interval - elapsed))
 
     async def _maintenance_loop(self):
         while self._running:
@@ -188,17 +200,29 @@ class MonitoringEngine:
             selectinload(Device.gateway_device),
             selectinload(Device.primary_link),
         ))).scalars().all()
+        now = datetime.now(timezone.utc)
+        due_devices = [device for device in devices if self._device_is_due(device, now)]
+        due_devices.sort(key=lambda device: self._normalise_timestamp(device.last_monitored_at) or datetime.min.replace(tzinfo=timezone.utc))
+        self.last_deferred_device_probe_count = max(0, len(due_devices) - self._probe_batch_size)
+        due_devices = due_devices[:self._probe_batch_size]
+        self.last_device_probe_count = len(due_devices)
         gateway_ping_cache: dict[str, dict] = {}
         self._latest_device_probes = {}
+        probe_results = await self._run_device_probes(due_devices)
+        probe_by_ip = {
+            (device.ip_address or "").strip(): result
+            for device, result in probe_results
+            if (device.ip_address or "").strip()
+        }
+        status_events: list[dict] = []
 
-        for device in devices:
+        for device, ping_res in probe_results:
             if not device.ip_address:
                 continue
-
-            ping_res = await ping_target(device.ip_address, count=2)
             self._latest_device_probes[device.id] = ping_res
             is_up = ping_res["is_up"]
-            dependency_down, dependency_reason = await self._detect_downstream_dependency(device, gateway_ping_cache)
+            dependency_down, dependency_reason = await self._detect_downstream_dependency(
+                device, gateway_ping_cache, probe_by_ip)
             initial_state = "UP" if device.status == DeviceStatus.ONLINE else "DOWN" if device.status == DeviceStatus.OFFLINE else "UNKNOWN"
             stable_state, _ = state_tracker.update("DEVICE", device.id, is_up, initial_state)
             new_status = DeviceStatus.ONLINE if stable_state == "UP" else (
@@ -206,8 +230,7 @@ class MonitoringEngine:
             )
             if device.status != new_status:
                 device.status = new_status
-                await db.commit()
-                await ws_manager.broadcast("device_status_change", {
+                status_events.append({
                     "id": device.id,
                     "name": device.name,
                     "status": new_status.value,
@@ -244,9 +267,39 @@ class MonitoringEngine:
                 packet_loss_pct=ping_res.get("packet_loss_pct"),
             )
             db.add(res_entry)
+            device.last_monitored_at = now
         await db.commit()
+        for event in status_events:
+            await ws_manager.broadcast("device_status_change", event)
 
-    async def _detect_downstream_dependency(self, device: Device, gateway_ping_cache: dict[str, dict]) -> tuple[bool, str | None]:
+    @staticmethod
+    def _normalise_timestamp(value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+
+    def _device_is_due(self, device: Device, now: datetime) -> bool:
+        last_probe = self._normalise_timestamp(device.last_monitored_at)
+        return last_probe is None or now - last_probe >= timedelta(seconds=max(1, device.monitoring_interval))
+
+    async def _run_device_probes(self, devices: list[Device]) -> list[tuple[Device, dict]]:
+        """Probe in bounded parallelism while keeping database work single-session.
+
+        Remote subprocesses never hold a database connection. This is crucial
+        when a network segment is slow or unavailable: the database pool stays
+        available for API requests and result persistence.
+        """
+        semaphore = asyncio.Semaphore(self._probe_concurrency)
+
+        async def probe(device: Device) -> tuple[Device, dict]:
+            async with semaphore:
+                result = await ping_target(device.ip_address or "", count=2)
+                return device, result
+
+        return list(await asyncio.gather(*(probe(device) for device in devices if device.ip_address)))
+
+    async def _detect_downstream_dependency(self, device: Device, gateway_ping_cache: dict[str, dict],
+                                            probe_by_ip: dict[str, dict]) -> tuple[bool, str | None]:
         if device.primary_link and device.primary_link.status == LinkStatus.DOWN:
             return True, f"The associated primary link is down: {device.primary_link.name}."
 
@@ -259,7 +312,7 @@ class MonitoringEngine:
         gateway_ip = (device.gateway_ip_address or "").strip()
         if gateway_ip and gateway_ip != (device.ip_address or "").strip():
             if gateway_ip not in gateway_ping_cache:
-                gateway_ping_cache[gateway_ip] = await ping_target(gateway_ip, count=1)
+                gateway_ping_cache[gateway_ip] = probe_by_ip.get(gateway_ip) or await ping_target(gateway_ip, count=1)
             if not gateway_ping_cache[gateway_ip]["is_up"]:
                 return True, f"The gateway did not respond to ICMP probes: {gateway_ip}."
 

@@ -16,3 +16,15 @@ def test_interface_rates_require_two_samples_and_use_counter_delta():
     assert second[0]["in_bps"] == 160
     assert second[0]["out_bps"] == 240
     assert second[0]["utilization_percent"] == 40
+
+
+def test_interface_rates_accept_naive_timestamp_returned_by_mysql():
+    previous_at = datetime(2026, 9, 19, 16, 0, 0)
+    current_at = datetime(2026, 9, 19, 16, 0, 10, tzinfo=timezone.utc)
+    previous = [{"index": 1, "bytes_received": 100, "bytes_sent": 200, "speed_bps": 1000}]
+    current = [{"index": 1, "bytes_received": 300, "bytes_sent": 500, "speed_bps": 1000}]
+
+    result = enrich_interface_rates(current, previous, current_at, previous_at)
+
+    assert result[0]["in_bps"] == 160
+    assert result[0]["out_bps"] == 240

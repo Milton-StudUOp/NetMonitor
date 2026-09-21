@@ -37,7 +37,7 @@ SYS_NET_OK
 
 @pytest.mark.asyncio
 async def test_systemd_service_inventory_is_normalized():
-    provider = LinuxMonitoringProvider(FakeTransport(["""Id=nginx.service
+    transport = FakeTransport(["""Id=nginx.service
 Description=A high performance web server
 ActiveState=active
 SubState=running
@@ -47,12 +47,15 @@ Id=backup.service
 Description=Nightly backup
 ActiveState=failed
 SubState=failed
-UnitFileState=disabled"""]))
+UnitFileState=disabled"""])
+    provider = LinuxMonitoringProvider(transport)
     services = await provider.discover_services()
     assert services[0]["state"] == "running"
     assert services[0]["start_mode"] == "enabled"
     assert services[0]["monitoring_provider"] == "linux"
     assert services[1]["state"] == "stopped"
+    assert "list-units --type=service --all" in transport.commands[0]
+    assert "systemctl show" in transport.commands[0]
 
 
 @pytest.mark.asyncio

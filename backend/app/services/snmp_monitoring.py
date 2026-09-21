@@ -144,11 +144,12 @@ class SNMPMonitoringProvider(MonitoringProvider):
     async def detect_capabilities(self) -> CapabilityResult:
         try:
             data = await self.transport.get(OID_SYS_DESCR, OID_SYS_UPTIME)
-            interfaces = await self.transport.walk(OID_IF_DESCR, limit=20)
         except MonitoringProviderError:
             raise
         except Exception as exc:
             raise SNMPMonitoringError("SNMP_UNAVAILABLE", "SNMP agent is unavailable or not responding") from exc
+        interfaces = await self._interfaces(limit=20)
+        storage = await self._storage()
         sys_descr = data.get(OID_SYS_DESCR, "")
         uptime = _int_or_none(data.get(OID_SYS_UPTIME))
         capabilities = {
@@ -158,7 +159,7 @@ class SNMPMonitoringProvider(MonitoringProvider):
             "cpu": False,
             "memory": False,
             "uptime": uptime is not None,
-            "storage": True,
+            "storage": bool(storage),
             "network_interfaces": bool(interfaces),
             "system_information": True,
         }
@@ -211,20 +212,29 @@ class SNMPMonitoringProvider(MonitoringProvider):
             for key in labels
         }
 
-    async def _interfaces(self) -> list[dict]:
-        descriptions = await self.transport.walk(OID_IF_DESCR)
+    async def _optional_walk(self, oid: str, limit: int = 500) -> dict[int, Any]:
+        try:
+            return await self.transport.walk(oid, limit=limit)
+        except SNMPMonitoringError:
+            # Network gear often implements only part of IF-MIB or
+            # HOST-RESOURCES-MIB. Missing optional OIDs must not discard all
+            # otherwise valid telemetry.
+            return {}
+
+    async def _interfaces(self, limit: int = 500) -> list[dict]:
+        descriptions = await self._optional_walk(OID_IF_DESCR, limit=limit)
         if not descriptions:
             return []
         tables = {
-            "type": await self.transport.walk(OID_IF_TYPE),
-            "mtu": await self.transport.walk(OID_IF_MTU),
-            "speed": await self.transport.walk(OID_IF_SPEED),
-            "admin": await self.transport.walk(OID_IF_ADMIN_STATUS),
-            "oper": await self.transport.walk(OID_IF_OPER_STATUS),
-            "in_octets": await self.transport.walk(OID_IF_IN_OCTETS),
-            "out_octets": await self.transport.walk(OID_IF_OUT_OCTETS),
-            "in_errors": await self.transport.walk(OID_IF_IN_ERRORS),
-            "out_errors": await self.transport.walk(OID_IF_OUT_ERRORS),
+            "type": await self._optional_walk(OID_IF_TYPE, limit=limit),
+            "mtu": await self._optional_walk(OID_IF_MTU, limit=limit),
+            "speed": await self._optional_walk(OID_IF_SPEED, limit=limit),
+            "admin": await self._optional_walk(OID_IF_ADMIN_STATUS, limit=limit),
+            "oper": await self._optional_walk(OID_IF_OPER_STATUS, limit=limit),
+            "in_octets": await self._optional_walk(OID_IF_IN_OCTETS, limit=limit),
+            "out_octets": await self._optional_walk(OID_IF_OUT_OCTETS, limit=limit),
+            "in_errors": await self._optional_walk(OID_IF_IN_ERRORS, limit=limit),
+            "out_errors": await self._optional_walk(OID_IF_OUT_ERRORS, limit=limit),
         }
         rows = []
         for index, name in sorted(descriptions.items()):
@@ -245,12 +255,12 @@ class SNMPMonitoringProvider(MonitoringProvider):
         return rows
 
     async def _storage(self) -> list[dict]:
-        descriptions = await self.transport.walk(OID_HR_STORAGE_DESCR)
+        descriptions = await self._optional_walk(OID_HR_STORAGE_DESCR)
         if not descriptions:
             return []
-        allocation_units = await self.transport.walk(OID_HR_STORAGE_ALLOCATION_UNITS)
-        sizes = await self.transport.walk(OID_HR_STORAGE_SIZE)
-        used = await self.transport.walk(OID_HR_STORAGE_USED)
+        allocation_units = await self._optional_walk(OID_HR_STORAGE_ALLOCATION_UNITS)
+        sizes = await self._optional_walk(OID_HR_STORAGE_SIZE)
+        used = await self._optional_walk(OID_HR_STORAGE_USED)
         rows = []
         for index, name in sorted(descriptions.items()):
             unit = _int_or_none(allocation_units.get(index)) or 0

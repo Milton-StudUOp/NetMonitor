@@ -12,7 +12,13 @@ export function useWebSocket(onEvent, enabled = true) {
 
   useEffect(() => {
     let timeoutId = null;
+    let heartbeatId = null;
     let disposed = false;
+
+    const stopHeartbeat = () => {
+      if (heartbeatId) window.clearInterval(heartbeatId);
+      heartbeatId = null;
+    };
 
     const connect = () => {
       if (disposed || !enabled) return;
@@ -30,6 +36,10 @@ export function useWebSocket(onEvent, enabled = true) {
           return;
         }
         ws.send(JSON.stringify({ type: 'authenticate', token }));
+        stopHeartbeat();
+        heartbeatId = window.setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) ws.send('ping');
+        }, 20000);
       };
 
       ws.onmessage = (event) => {
@@ -46,6 +56,7 @@ export function useWebSocket(onEvent, enabled = true) {
       };
 
       ws.onclose = () => {
+        stopHeartbeat();
         setIsConnected(false);
         if (!disposed) {
           timeoutId = setTimeout(connect, 3000);
@@ -62,6 +73,7 @@ export function useWebSocket(onEvent, enabled = true) {
     return () => {
       disposed = true;
       if (timeoutId) clearTimeout(timeoutId);
+      stopHeartbeat();
       if (wsRef.current) {
         wsRef.current.close(1000, 'Component unmounted');
       }

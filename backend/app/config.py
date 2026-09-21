@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     INTERVAL_CRITICAL: int = 5
     INTERVAL_NORMAL: int = 30
     INTERVAL_SERVICES: int = 10
+    # Resource ceilings for the local collector. They are deployment
+    # configuration, never credentials or implicit per-device defaults.
+    MONITORING_PROBE_CONCURRENCY: int = 100
+    MONITORING_PROBE_BATCH_SIZE: int = 1000
 
     # State machine thresholds
     FAILURES_TO_DOWN: int = 3

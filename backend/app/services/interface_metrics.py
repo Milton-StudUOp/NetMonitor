@@ -11,7 +11,9 @@ def selected_interfaces(rows: list[dict] | None, selected: list[int] | None) -> 
 def enrich_interface_rates(rows: list[dict] | None, previous: list[dict] | None,
                            collected_at: datetime, previous_at: datetime | None) -> list[dict]:
     old = {int(row.get("index", -1)): row for row in previous or []}
-    elapsed = (collected_at - previous_at).total_seconds() if previous_at else 0
+    current_time = _as_utc(collected_at)
+    prior_time = _as_utc(previous_at) if previous_at else None
+    elapsed = (current_time - prior_time).total_seconds() if prior_time else 0
     output = []
     for row in rows or []:
         value = dict(row); prior = old.get(int(row.get("index", -1)))
@@ -26,3 +28,8 @@ def enrich_interface_rates(rows: list[dict] | None, previous: list[dict] | None,
                 value["utilization_percent"] = round(total * 100 / speed, 2)
         output.append(value)
     return output
+
+
+def _as_utc(value: datetime) -> datetime:
+    """Normalize drivers that return MySQL DATETIME values without tzinfo."""
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
