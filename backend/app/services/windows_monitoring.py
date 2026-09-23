@@ -22,6 +22,17 @@ def classify_winrm_error(exc: Exception) -> tuple[str, str]:
     return "WINRM_UNAVAILABLE", "Windows remote management is unavailable"
 
 
+def classify_powershell_error(output: bytes | str | None) -> tuple[str, str]:
+    message = (output.decode("utf-8", errors="replace") if isinstance(output, bytes) else str(output or "")).lower()
+    if "access is denied" in message or "unauthorizedaccessexception" in message:
+        return "PERMISSION_DENIED", "The account lacks permission to query Windows management data"
+    if "not recognized" in message or "commandnotfoundexception" in message:
+        return "PROVIDER_UNAVAILABLE", "The target does not provide the required Windows management commands"
+    if "invalid class" in message or "invalid namespace" in message:
+        return "CAPABILITY_UNAVAILABLE", "The target does not expose a required Windows management class"
+    return "DISCOVERY_FAILED", "Windows remote command failed"
+
+
 class WinRMTransport:
     def __init__(self, host: str, username: str, password: str, port: int = 5986,
                  use_https: bool = True, verify_certificate: bool = True,
@@ -48,7 +59,8 @@ class WinRMTransport:
             code, safe = classify_winrm_error(exc)
             raise WindowsMonitoringError(code, safe) from exc
         if result.status_code != 0:
-            raise WindowsMonitoringError("DISCOVERY_FAILED", "Windows capability discovery failed")
+            code, safe = classify_powershell_error(result.std_err)
+            raise WindowsMonitoringError(code, safe)
         return result.std_out.decode("utf-8", errors="replace").strip()
 
     async def run_powershell(self, script: str) -> str:
@@ -61,13 +73,20 @@ class WinRMTransport:
 class WindowsMonitoringProvider(MonitoringProvider):
     CAPABILITY_SCRIPT = r"""
 $ErrorActionPreference='Stop'
-$os=Get-WmiObject Win32_OperatingSystem
+$hasCim=[bool](Get-Command Get-CimClass -ErrorAction SilentlyContinue)
+$hasWmi=[bool](Get-Command Get-WmiObject -ErrorAction SilentlyContinue)
+if(-not $hasCim -and -not $hasWmi){throw 'No Windows management cmdlet is available'}
 $ps=if($PSVersionTable){$PSVersionTable.PSVersion.ToString()}else{'1.0'}
 $classes=@{}
 foreach($item in @('Win32_Service','Win32_Processor','Win32_OperatingSystem','Win32_LogicalDisk','Win32_NetworkAdapterConfiguration','Win32_PerfFormattedData_PerfProc_Process','Win32_NTLogEvent')){
-  try{$null=Get-WmiObject $item -ErrorAction Stop | Select-Object -First 1;$classes[$item]=$true}catch{$classes[$item]=$false}
+  try{
+    if($hasCim){$null=Get-CimClass -ClassName $item -ErrorAction Stop}
+    else{$null=Get-WmiObject -List -Class $item -ErrorAction Stop}
+    $classes[$item]=$true
+  }catch{$classes[$item]=$false}
 }
-@{operating_system=$os.Caption;powershell_version=$ps;classes=$classes} | ConvertTo-Json -Compress -Depth 4
+$mode=if($hasCim){'MODERN_CIM'}else{'LEGACY_WMI'}
+@{operating_system=$env:OS;powershell_version=$ps;mode=$mode;classes=$classes} | ConvertTo-Json -Compress -Depth 4
 """
 
     def __init__(self, transport: WinRMTransport): self.transport = transport
@@ -83,7 +102,7 @@ foreach($item in @('Win32_Service','Win32_Processor','Win32_OperatingSystem','Wi
         classes = data.get("classes") or {}
         available = lambda name, default=False: bool(classes.get(name, default))
         return CapabilityResult(data.get("operating_system"), version,
-            "MODERN_CIM" if major >= 3 else "LEGACY_WMI",
+            data.get("mode") or ("MODERN_CIM" if major >= 3 else "LEGACY_WMI"),
             {"services": available("Win32_Service", True),
              "cpu": available("Win32_Processor"),
              "memory": available("Win32_OperatingSystem"),
@@ -129,32 +148,37 @@ Get-WmiObject Win32_Service | Select-Object Name,DisplayName,State,StartMode,Des
         return {str(x["Name"]): str(x.get("State") or "unknown").lower() for x in values}
 
     async def collect_system_metrics(self) -> dict:
-        raw = await self.transport.run_powershell(r"""
-$ErrorActionPreference='Stop'
-$os=Get-WmiObject Win32_OperatingSystem
-$cpu=(Get-WmiObject Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average
-$disks=Get-WmiObject Win32_LogicalDisk -Filter "DriveType=3" | ForEach-Object {@{name=$_.DeviceID;label=$_.VolumeName;file_system=$_.FileSystem;size_bytes=[int64]$_.Size;free_bytes=[int64]$_.FreeSpace;used_percent=if($_.Size){[math]::Round((1-($_.FreeSpace/$_.Size))*100,2)}else{0}}}
-$adapterStates=@{}
-Get-WmiObject Win32_NetworkAdapter -ErrorAction SilentlyContinue | ForEach-Object {
-  $state=if($_.NetConnectionStatus -eq 2){'up'}elseif($_.NetConnectionStatus -in 0,1,4,5,6,7){'down'}else{'unknown'}
-  @($_.Name,$_.NetConnectionID,$_.Description) | Where-Object {$_} | ForEach-Object {$adapterStates[$_.ToString().ToLowerInvariant()]=$state}
-}
-if(Get-Command Get-NetAdapter -ErrorAction SilentlyContinue){
-  Get-NetAdapter -IncludeHidden -ErrorAction SilentlyContinue | ForEach-Object {
-    $state=if($_.Status -eq 'Up'){'up'}elseif($_.Status -in 'Disabled','Disconnected','Not Present','LowerLayerDown'){'down'}else{'unknown'}
-    @($_.Name,$_.InterfaceDescription) | Where-Object {$_} | ForEach-Object {$adapterStates[$_.ToString().ToLowerInvariant()]=$state}
-  }
-}
-$net=Get-WmiObject Win32_PerfFormattedData_Tcpip_NetworkInterface -ErrorAction SilentlyContinue | ForEach-Object {
-  $name=$_.Name; $lookup=$name.ToString().ToLowerInvariant(); $status=$adapterStates[$lookup]
-  if(!$status){foreach($key in $adapterStates.Keys){if($lookup.Contains($key) -or $key.Contains($lookup)){$status=$adapterStates[$key];break}}}
-  @{name=$name;status=if($status){$status}else{'unknown'};bytes_received_per_sec=[int64]$_.BytesReceivedPersec;bytes_sent_per_sec=[int64]$_.BytesSentPersec;packets_received_errors=[int64]$_.PacketsReceivedErrors;packets_outbound_errors=[int64]$_.PacketsOutboundErrors}
-}
-$adapters=Get-WmiObject Win32_NetworkAdapterConfiguration -Filter "IPEnabled=True" -ErrorAction SilentlyContinue | ForEach-Object {@{description=$_.Description;mac_address=$_.MACAddress;ip_addresses=@($_.IPAddress);gateways=@($_.DefaultIPGateway)}}
-$processes=Get-WmiObject Win32_PerfFormattedData_PerfProc_Process -ErrorAction SilentlyContinue | Where-Object {$_.Name -ne '_Total' -and $_.Name -ne 'Idle'} | Sort-Object PercentProcessorTime -Descending | Select-Object -First 20 | ForEach-Object {@{name=$_.Name;process_id=[int]$_.IDProcess;cpu_percent=[double]$_.PercentProcessorTime;working_set_bytes=[int64]$_.WorkingSetPrivate}}
-$events=Get-WmiObject Win32_NTLogEvent -Filter "Logfile='System' AND (EventType=1 OR EventType=2)" -ErrorAction SilentlyContinue | Select-Object -First 20 | ForEach-Object {@{source=$_.SourceName;event_code=[int]$_.EventCode;type=[int]$_.EventType;message=$_.Message;time_generated=$_.TimeGenerated}}
-$system=@{caption=$os.Caption;version=$os.Version;architecture=$os.OSArchitecture;computer_name=$os.CSName;manufacturer=(Get-WmiObject Win32_ComputerSystem).Manufacturer;model=(Get-WmiObject Win32_ComputerSystem).Model;last_boot=$os.LastBootUpTime}
-@{cpu_percent=[double]$cpu;memory_percent=[math]::Round((1-($os.FreePhysicalMemory/$os.TotalVisibleMemorySize))*100,2);uptime_seconds=[int64]((Get-Date)-$os.ConvertToDateTime($os.LastBootUpTime)).TotalSeconds;storage=@($disks);network_interfaces=@($net);network_adapters=@($adapters);processes=@($processes);system_information=$system;events=@($events)} | ConvertTo-Json -Compress -Depth 6
+        core_raw = await self.transport.run_powershell(r"""
+$ErrorActionPreference='Stop';$os=Get-WmiObject Win32_OperatingSystem;$cpu=(Get-WmiObject Win32_Processor|Measure-Object LoadPercentage -Average).Average;$computer=Get-WmiObject Win32_ComputerSystem;$disks=@(Get-WmiObject Win32_LogicalDisk -Filter "DriveType=3"|%{@{name=$_.DeviceID;label=$_.VolumeName;file_system=$_.FileSystem;size_bytes=[int64]$_.Size;free_bytes=[int64]$_.FreeSpace;used_percent=if($_.Size){[math]::Round((1-($_.FreeSpace/$_.Size))*100,2)}else{0}}});$boot=$os.ConvertToDateTime($os.LastBootUpTime);@{cpu_percent=[double]$cpu;memory_percent=[math]::Round((1-($os.FreePhysicalMemory/$os.TotalVisibleMemorySize))*100,2);uptime_seconds=[int64]((Get-Date)-$boot).TotalSeconds;storage=$disks;system_information=@{caption=$os.Caption;version=$os.Version;architecture=$os.OSArchitecture;computer_name=$os.CSName;manufacturer=$computer.Manufacturer;model=$computer.Model;last_boot=$os.LastBootUpTime}}|ConvertTo-Json -Compress -Depth 5
 """)
-        try: return json.loads(raw)
-        except ValueError as exc: raise WindowsMonitoringError("DISCOVERY_FAILED", "Windows returned an invalid metrics response") from exc
+        scripts = {
+            "network": r"""$ErrorActionPreference='Stop';$net=@(Get-WmiObject Win32_NetworkAdapter|%{$s=if($_.NetConnectionStatus-eq 2){'up'}elseif($_.NetConnectionStatus-in 0,1,4,5,6,7){'down'}else{'unknown'};@{index=[int]$_.InterfaceIndex;name=if($_.NetConnectionID){$_.NetConnectionID}else{$_.Name};description=$_.Description;status=$s;mac_address=$_.MACAddress}});$cfg=@(Get-WmiObject Win32_NetworkAdapterConfiguration -Filter "IPEnabled=True"|%{@{description=$_.Description;mac_address=$_.MACAddress;ip_addresses=@($_.IPAddress);gateways=@($_.DefaultIPGateway)}});@{network_interfaces=$net;network_adapters=$cfg}|ConvertTo-Json -Compress -Depth 5""",
+            "processes": r"""$ErrorActionPreference='Stop';@(Get-WmiObject Win32_PerfFormattedData_PerfProc_Process|?{$_.Name-ne'_Total'-and$_.Name-ne'Idle'}|Sort PercentProcessorTime -Descending|Select -First 20|%{@{name=$_.Name;process_id=[int]$_.IDProcess;cpu_percent=[double]$_.PercentProcessorTime;working_set_bytes=[int64]$_.WorkingSetPrivate}})|ConvertTo-Json -Compress""",
+            "events": r"""$ErrorActionPreference='Stop';@(Get-WmiObject Win32_NTLogEvent -Filter "Logfile='System' AND (EventType=1 OR EventType=2)"|Select -First 20|%{@{source=$_.SourceName;event_code=[int]$_.EventCode;type=[int]$_.EventType;message=$_.Message;time_generated=$_.TimeGenerated}})|ConvertTo-Json -Compress -Depth 3""",
+        }
+        try:
+            result = json.loads(core_raw)
+        except (ValueError, TypeError) as exc:
+            raise WindowsMonitoringError("DISCOVERY_FAILED", "Windows returned an invalid core metrics response") from exc
+
+        async def optional(name: str, script: str):
+            try:
+                raw = await self.transport.run_powershell(script)
+                return name, json.loads(raw or "[]")
+            except (MonitoringProviderError, ValueError, TypeError):
+                return name, []
+
+        optional_results = await asyncio.gather(*(optional(name, script) for name, script in scripts.items()))
+        values = dict(optional_results)
+        network = values.get("network") if isinstance(values.get("network"), dict) else {}
+        result["network_interfaces"] = network.get("network_interfaces", [])
+        result["network_adapters"] = network.get("network_adapters", [])
+        processes = values.get("processes", [])
+        if isinstance(processes, dict):
+            processes = processes.get("processes", [processes])
+        events = values.get("events", [])
+        if isinstance(events, dict):
+            events = events.get("events", [events])
+        result["processes"] = processes
+        result["events"] = events
+        return result

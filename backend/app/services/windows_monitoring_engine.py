@@ -4,6 +4,7 @@ from time import perf_counter
 
 import structlog
 from sqlalchemy import and_, or_, select
+from sqlalchemy.exc import OperationalError
 
 from app.database import async_session_factory
 from app.models.alert import Alert, AlertSeverity
@@ -49,8 +50,23 @@ class WindowsMonitoringEngine:
 
     async def _loop(self):
         while self._running:
-            try: await self.run_due_checks()
-            except Exception as exc: logger.warning("windows_monitoring_cycle_failed", error=type(exc).__name__)
+            try:
+                await self.run_due_checks()
+            except OperationalError:
+                # A collector can race with schema/startup work or encounter a
+                # recycled MySQL connection. Retry once without stopping or
+                # delaying the independent SSH, SNMP, and WinRM schedules.
+                await asyncio.sleep(1)
+                try:
+                    await self.run_due_checks()
+                except Exception as retry_exc:
+                    original = getattr(retry_exc, "orig", None)
+                    args = getattr(original, "args", ())
+                    logger.warning("remote_monitoring_database_retry_failed",
+                        database_code=args[0] if args else None,
+                        error_type=type(retry_exc).__name__)
+            except Exception as exc:
+                logger.warning("remote_monitoring_cycle_failed", error_type=type(exc).__name__)
             await asyncio.sleep(10)
 
     async def run_due_checks(self):
@@ -71,7 +87,14 @@ class WindowsMonitoringEngine:
         device_ids = set(service_device_ids)
         device_ids.update(metric_device_ids)
         claimed_ids = await self._claim_due_checks(device_ids)
-        await asyncio.gather(*(self._check_device(device_id, now, claimed=True) for device_id in claimed_ids))
+        results = await asyncio.gather(
+            *(self._check_device(device_id, now, claimed=True) for device_id in claimed_ids),
+            return_exceptions=True,
+        )
+        for device_id, result in zip(claimed_ids, results):
+            if isinstance(result, Exception):
+                logger.warning("remote_monitoring_device_failed", device_id=device_id,
+                    error_type=type(result).__name__)
 
     async def _claim_due_checks(self, device_ids: set[int]) -> list[int]:
         """Claim remote checks before creating local tasks.
@@ -107,8 +130,8 @@ class WindowsMonitoringEngine:
             scope = f"remote-check:{device_id}"
             if not claimed and not await collector_coordinator.claim(scope):
                 return
-            context = await self._load_check_context(device_id, now)
             try:
+                context = await self._load_check_context(device_id, now)
                 if context is None:
                     return
                 (device, services, diagnostics, capability_provider, provider, provider_name, enabled_metrics,
@@ -127,6 +150,11 @@ class WindowsMonitoringEngine:
                     enabled_metrics, observed, elapsed, values, previous_storage,
                     previous_collected_at, now,
                 )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("remote_monitoring_device_failed", device_id=device_id,
+                    error_type=type(exc).__name__)
             finally:
                 await collector_coordinator.release(scope)
 

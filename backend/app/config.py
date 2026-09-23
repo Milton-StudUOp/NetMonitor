@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     # configuration, never credentials or implicit per-device defaults.
     MONITORING_PROBE_CONCURRENCY: int = 100
     MONITORING_PROBE_BATCH_SIZE: int = 1000
+    ICMP_PROCESS_CONCURRENCY: int = 32
     COLLECTOR_ID: str = ""
     COLLECTOR_LEASE_SECONDS: int = 45
     COLLECTOR_ENABLED: bool = True

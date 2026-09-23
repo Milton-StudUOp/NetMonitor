@@ -4,7 +4,10 @@ import re
 import subprocess
 import structlog
 
+from app.config import get_settings
+
 logger = structlog.get_logger()
+_icmp_process_limit = asyncio.Semaphore(max(1, get_settings().ICMP_PROCESS_CONCURRENCY))
 
 
 def _run_ping_sync(ip_address: str, count: int, timeout: float):
@@ -20,6 +23,22 @@ def _run_ping_sync(ip_address: str, count: int, timeout: float):
     return res.returncode, res.stdout, res.stderr
 
 
+async def _run_ping_async(ip_address: str, count: int, timeout: float):
+    cmd = ["ping", "-c", str(count), "-W", str(max(1, int(timeout))), ip_address]
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout * count + 3.0)
+    except asyncio.TimeoutError:
+        process.kill()
+        await process.wait()
+        raise
+    return process.returncode, stdout, stderr
+
+
 async def ping_target(ip_address: str, count: int = 2, timeout: float = 2.0) -> dict:
     """
     Executes ICMP ping probe asynchronously using threadpool subprocess execution.
@@ -33,9 +52,15 @@ async def ping_target(ip_address: str, count: int = 2, timeout: float = 2.0) -> 
     is_win = platform.system().lower() == "windows"
 
     try:
-        returncode, stdout_bytes, stderr_bytes = await asyncio.to_thread(
-            _run_ping_sync, ip_address, count, timeout
-        )
+        async with _icmp_process_limit:
+            if is_win:
+                returncode, stdout_bytes, stderr_bytes = await asyncio.to_thread(
+                    _run_ping_sync, ip_address, count, timeout
+                )
+            else:
+                returncode, stdout_bytes, stderr_bytes = await _run_ping_async(
+                    ip_address, count, timeout
+                )
 
         # Safely decode output using appropriate encoding for Windows/Linux
         output = ""

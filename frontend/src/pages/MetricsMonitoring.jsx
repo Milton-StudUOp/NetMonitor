@@ -42,7 +42,7 @@ export function MonitoredDevicesSection({ embedded=false,canManage=false }){
 }
 
 function SelectedMetricDevice({row,canManage}){
-  const navigate=useNavigate(); const {device,latest:item}=row;
+  const navigate=useNavigate(); const {device}=row; const item={...(row.latest||{}),enabled_metrics:row.enabled_metrics||row.latest?.enabled_metrics||[]};
   return <div className="metrics-spotlight">
     <div className="metrics-spotlight-main"><div className="metrics-device-identity"><span className="metrics-eyebrow">Device overview</span><h3>{device.name}</h3><p>{device.ip_address||'No IP address'} <span aria-hidden="true">•</span> Updated {collectedAt(item)}</p></div><span className={`badge badge-${device.status==='ONLINE'?'online':'offline'}`}>{device.status}</span></div>
     <div className="metrics-spotlight-grid"><Metric icon={Cpu} label="CPU usage" value={scalar(item,'cpu',item?.cpu_percent,'%')}/><Metric icon={MemoryStick} label="Memory" value={scalar(item,'memory',item?.memory_percent,'%')}/><Metric icon={Activity} label="System uptime" value={enabled(item,'uptime')?(item?.uptime_seconds==null?'Awaiting data':uptime(item.uptime_seconds)):'Not monitored'}/><Metric icon={Network} label="Interfaces" value={count(item,'network_interfaces',item?.network_interfaces?.length)}/></div>
@@ -50,8 +50,9 @@ function SelectedMetricDevice({row,canManage}){
   </div>
 }
 
-function MetricDeviceCard({device,latest:item,selected,onSelect,canManage}){
+function MetricDeviceCard({device,latest,enabled_metrics,selected,onSelect,canManage}){
   const navigate=useNavigate();
+  const item={...(latest||{}),enabled_metrics:enabled_metrics||latest?.enabled_metrics||[]};
   const metricRows=[
     ['cpu',<Cpu size={15}/>,'CPU',scalar(item,'cpu',item.cpu_percent,'%')],
     ['memory',<MemoryStick size={15}/>,'Memory',scalar(item,'memory',item.memory_percent,'%')],
@@ -63,7 +64,7 @@ function MetricDeviceCard({device,latest:item,selected,onSelect,canManage}){
     <header onDoubleClick={()=>navigate(`/devices/${device.id}`)}><div><strong>{device.name}</strong><span>{device.ip_address||'No IP'}</span></div><span className={`badge badge-${device.status==='ONLINE'?'online':'offline'}`}>{device.status}</span></header>
     <div className="metrics-values">{metricRows.map(([key,icon,label,value])=><div key={key} className={`metric-tile ${!enabled(item,key)?'metric-not-monitored':''}`}><span className="metric-tile-label">{icon}{label}</span><b>{value}</b></div>)}</div>
     <div className="metric-card-footer"><small>Updated {collectedAt(item)}</small>{canManage&&<button className="metric-config-link" onClick={event=>{event.stopPropagation();navigate(`/metrics-discovery?device=${device.id}`)}}><Edit3 size={14}/>Configure</button>}</div>
-    <MetricDetails item={item}/>
+    {latest&&<MetricDetails item={item}/>}
   </article>;
 }
 

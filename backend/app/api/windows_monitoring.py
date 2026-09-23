@@ -40,6 +40,15 @@ async def _provider(db: AsyncSession, device: Device):
     except MonitoringProviderError as exc: raise HTTPException(400, {"code":exc.code,"message":str(exc)}) from exc
 
 
+def _supported_metrics(capability: DeviceCapability | None) -> dict[str, bool]:
+    values = capability.capabilities if capability and isinstance(capability.capabilities, dict) else {}
+    return {
+        key: bool(value.get("supported")) if isinstance(value, dict) else bool(value)
+        for key, value in values.items()
+        if key != "services"
+    }
+
+
 def _service(item: DiscoveredService) -> dict:
     result = {key: getattr(item, key) for key in ("id", "device_id", "name", "display_name", "description",
         "service_account", "state", "start_mode", "monitoring_provider", "monitored", "expected_state",
@@ -278,6 +287,14 @@ async def metric_capabilities(device_id: int, db: AsyncSession = Depends(get_db)
     except MonitoringProviderError as exc: raise HTTPException(409, {"code": exc.code, "message": str(exc)}) from exc
     saved = (await db.execute(select(DeviceCapability).where(DeviceCapability.device_id == device_id,
         DeviceCapability.provider == provider_name))).scalar_one_or_none()
+    if not saved:
+        saved = DeviceCapability(device_id=device_id, provider=provider_name, platform=provider_name.lower())
+        db.add(saved)
+    saved.capabilities = {key: bool(value.get("supported")) for key, value in capabilities.items()}
+    saved.last_status = "READY"
+    saved.last_error_code = None
+    saved.discovered_at = datetime.now(timezone.utc)
+    await db.commit()
     enabled = (saved.diagnostics or {}).get("enabled_metrics", []) if saved else []
     return {"device_id": device.id, "device_name": device.name, "capabilities": capabilities,
         "enabled_metrics": enabled,
@@ -305,16 +322,15 @@ async def metric_interfaces(device_id: int, db: AsyncSession = Depends(get_db)):
 async def configure_metrics(device_id: int, payload: dict = Body(...), db: AsyncSession = Depends(get_db)):
     device = await db.get(Device, device_id)
     if not device: raise HTTPException(404, "Device not found")
-    provider, provider_name = await _provider(db, device)
-    try: available = await provider.discover_metric_capabilities()
-    except MonitoringProviderError as exc: raise HTTPException(409, {"code":exc.code,"message":str(exc)}) from exc
-    selected = list(dict.fromkeys(payload.get("enabled_metrics") or []))
-    invalid = [key for key in selected if key not in available or not available[key]["supported"]]
-    if invalid: raise HTTPException(400, f"Unsupported metrics: {', '.join(invalid)}")
+    _, provider_name = await _provider(db, device)
     item = (await db.execute(select(DeviceCapability).where(DeviceCapability.device_id == device_id,
         DeviceCapability.provider == provider_name))).scalar_one_or_none()
     if not item:
-        item = DeviceCapability(device_id=device_id, provider=provider_name, platform=provider_name.lower()); db.add(item)
+        raise HTTPException(409, "Discover supported metrics before saving the configuration")
+    available = _supported_metrics(item)
+    selected = list(dict.fromkeys(payload.get("enabled_metrics") or []))
+    invalid = [key for key in selected if not available.get(key, False)]
+    if invalid: raise HTTPException(400, f"Unsupported metrics: {', '.join(invalid)}")
     thresholds = payload.get("metric_thresholds") or {}
     clean_thresholds = {}
     for key in ("cpu","memory","storage"):
@@ -356,11 +372,13 @@ async def metrics_overview(db: AsyncSession = Depends(get_db)):
     for device in devices:
         latest = (await db.execute(select(SystemMetricSnapshot).where(SystemMetricSnapshot.device_id == device.id)
             .order_by(SystemMetricSnapshot.collected_at.desc()).limit(1))).scalar_one_or_none()
-        if latest:
-            snapshot = _metric_snapshot(latest)
-            snapshot["enabled_metrics"] = list((active_capabilities[device.id].diagnostics or {}).get("enabled_metrics", []))
-            result.append({"device": {"id": device.id, "name": device.name,
-                "ip_address": device.ip_address, "status": device.status.value}, "latest": snapshot})
+        enabled_metrics = list((active_capabilities[device.id].diagnostics or {}).get("enabled_metrics", []))
+        snapshot = _metric_snapshot(latest) if latest else None
+        if snapshot:
+            snapshot["enabled_metrics"] = enabled_metrics
+        result.append({"device": {"id": device.id, "name": device.name,
+            "ip_address": device.ip_address, "status": device.status.value},
+            "enabled_metrics": enabled_metrics, "latest": snapshot})
     return result
 
 

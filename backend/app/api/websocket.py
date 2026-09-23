@@ -61,6 +61,7 @@ async def close_if_connected(websocket: WebSocket, code: int) -> None:
 @router.websocket("/ws/monitoring")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
+    registered = False
     if not get_settings().AUTH_DISABLED:
         try:
             auth_message = await asyncio.wait_for(websocket.receive_json(), timeout=5)
@@ -73,9 +74,12 @@ async def websocket_endpoint(websocket: WebSocket):
                 await close_if_connected(websocket, code=4401)
                 return
             await db.commit()
-    await manager.connect(websocket, accept=False)
-    await websocket.send_text(json.dumps({"event": "authenticated"}))
     try:
+        await manager.connect(websocket, accept=False)
+        registered = True
+        # The browser can close during authentication or navigation. Treat
+        # that race as a normal disconnect instead of an ASGI exception.
+        await websocket.send_text(json.dumps({"event": "authenticated"}))
         while True:
             # A reverse proxy or a browser can disappear without a close
             # frame. Periodically require a client heartbeat so stale sockets
@@ -85,7 +89,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_text(json.dumps({"event": "pong"}))
     except (asyncio.TimeoutError, WebSocketDisconnect):
         await close_if_connected(websocket, code=1001)
-        manager.disconnect(websocket)
     except Exception as e:
         logger.error("ws_error", error_type=type(e).__name__)
-        manager.disconnect(websocket)
+    finally:
+        if registered:
+            manager.disconnect(websocket)
