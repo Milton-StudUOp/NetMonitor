@@ -101,7 +101,7 @@ async def forgot_password(data:ForgotPasswordInput,db:AsyncSession=Depends(get_d
         await db.flush()
         try:
             await send_account_email(db,user.email,build_account_email("RECOVERY",user.display_name,user.username,code,settings.PASSWORD_RESET_MINUTES))
-            db.add(AuditLog(action="PASSWORD_RECOVERY_EMAIL_SENT",entity_type="USER",entity_id=str(user.id),summary="Password recovery email delivered"))
+            db.add(AuditLog(action="PASSWORD_RECOVERY_EMAIL_SENT",entity_type="USER",entity_id=str(user.id),summary="Password recovery email accepted by SMTP"))
         except AccountEmailError:
             await db.delete(reset_token)
             db.add(AuditLog(action="PASSWORD_RECOVERY_EMAIL_FAILED",entity_type="USER",entity_id=str(user.id),summary="Password recovery email delivery failed"))

@@ -2,6 +2,7 @@ import asyncio
 import smtplib
 import ssl
 from email.message import EmailMessage
+from email.utils import formatdate, make_msgid, parseaddr
 from html import escape
 
 from sqlalchemy import select
@@ -74,6 +75,10 @@ async def send_account_email(db, recipient: str, content: dict[str, str]) -> Non
         raise AccountEmailError("The SMTP Email password is not configured.")
     mail = EmailMessage()
     mail["Subject"], mail["From"], mail["To"] = content["subject"], config["from_address"], recipient
+    mail["Date"] = formatdate(localtime=False)
+    sender_address = parseaddr(str(config["from_address"]))[1]
+    sender_domain = sender_address.rsplit("@", 1)[-1] if "@" in sender_address else None
+    mail["Message-ID"] = make_msgid(domain=sender_domain)
     mail.set_content(content["plain"])
     mail.add_alternative(content["html"], subtype="html")
 
@@ -87,7 +92,9 @@ async def send_account_email(db, recipient: str, content: dict[str, str]) -> Non
                 smtp.starttls(context=verified_tls_context())
             if config.get("username"):
                 smtp.login(config["username"], secrets["password"])
-            smtp.send_message(mail)
+            refused = smtp.send_message(mail)
+            if refused:
+                raise smtplib.SMTPRecipientsRefused(refused)
 
     try:
         await asyncio.to_thread(deliver)

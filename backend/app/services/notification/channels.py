@@ -5,7 +5,7 @@ import smtplib
 import ssl
 from datetime import datetime, timezone
 from email.message import EmailMessage
-from email.utils import parseaddr
+from email.utils import formatdate, make_msgid, parseaddr
 from html import escape
 from urllib.parse import urlparse
 
@@ -285,6 +285,10 @@ async def send_notification(
     mail["From"] = config["from_address"]
     recipients = recipient_targets("EMAIL", config, additional_recipients)
     mail["To"] = ", ".join(recipients)
+    mail["Date"] = formatdate(localtime=False)
+    sender_address = parseaddr(str(config["from_address"]))[1]
+    sender_domain = sender_address.rsplit("@", 1)[-1] if "@" in sender_address else None
+    mail["Message-ID"] = make_msgid(domain=sender_domain)
     mail.set_content(text)
     mail.add_alternative(content["html"], subtype="html")
 
@@ -298,7 +302,9 @@ async def send_notification(
                 smtp.starttls(context=verified_tls_context())
             if config.get("username"):
                 smtp.login(config["username"], secrets["password"])
-            smtp.send_message(mail)
+            refused = smtp.send_message(mail)
+            if refused:
+                raise smtplib.SMTPRecipientsRefused(refused)
 
     await asyncio.to_thread(send_email)
 
