@@ -14,6 +14,7 @@ from app.schemas.monitoring_provider import MonitoringProfileInput, ServiceMonit
 from app.services.monitoring_providers import MonitoringProviderError
 from app.services.provider_factory import provider_for_device
 from app.services.metric_alerts import evaluate_metric_alerts, resolve_disabled_metric_alerts
+from app.services.notification.dispatcher import schedule_persisted_notification
 from app.services.interface_metrics import enrich_interface_rates, selected_interfaces
 from app.api.access import require_operator
 
@@ -263,8 +264,12 @@ async def collect_metrics(device_id: int, db: AsyncSession = Depends(get_db)):
         memory_percent=values.get("memory_percent"), uptime_seconds=values.get("uptime_seconds"),
         storage={"disks": values.get("storage") or [], **details})
     db.add(item)
-    if capability: await evaluate_metric_alerts(db,device,values,capability.diagnostics or {})
+    pending_notifications = await evaluate_metric_alerts(
+        db, device, values, capability.diagnostics or {}
+    ) if capability else []
     await db.commit(); await db.refresh(item)
+    for title, message, severity, alert_id in pending_notifications:
+        schedule_persisted_notification(title, message, severity, alert_id)
     return _metric_snapshot(item)
 
 

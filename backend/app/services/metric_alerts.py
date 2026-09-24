@@ -1,12 +1,8 @@
-import asyncio
 from datetime import datetime, timezone
 
 from sqlalchemy import select
 
 from app.models.alert import Alert, AlertSeverity
-from app.services.notification.dispatcher import dispatch_persisted_notifications
-
-
 METRIC_LABELS = {"cpu":"CPU usage", "memory":"Memory usage", "storage":"Disk usage"}
 
 
@@ -16,11 +12,13 @@ def metric_values(values: dict) -> dict[str,float | None]:
         "storage":max(disks) if disks else None}
 
 
-async def evaluate_metric_alerts(db, device, values: dict, configuration: dict) -> None:
+async def evaluate_metric_alerts(db, device, values: dict, configuration: dict) -> list[tuple[str, str, str, int]]:
+    """Persist threshold state and return notifications for post-commit dispatch."""
     thresholds = configuration.get("metric_thresholds") or {}
     enabled_metrics = set(configuration.get("enabled_metrics") or [])
     notifications = bool(configuration.get("metric_notifications_enabled", True))
     now = datetime.now(timezone.utc)
+    pending = []
     for key, value in metric_values(values).items():
         policy = thresholds.get(key) or {}
         title = f"{METRIC_LABELS[key]} threshold on {device.name}"
@@ -39,11 +37,12 @@ async def evaluate_metric_alerts(db, device, values: dict, configuration: dict) 
                     device_id=device.id, root_cause="METRIC_THRESHOLD")
                 db.add(active); await db.flush()
                 if notifications:
-                    asyncio.create_task(dispatch_persisted_notifications(title,message,severity,active.id))
+                    pending.append((title, message, severity, active.id))
             else:
                 active.severity=AlertSeverity(severity); active.message=message
         elif active:
             active.is_resolved=True; active.resolved_at=now
+    return pending
 
 
 async def resolve_disabled_metric_alerts(db, device_id: int, configuration: dict) -> int:

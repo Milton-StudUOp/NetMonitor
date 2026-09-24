@@ -15,7 +15,7 @@ from app.services.monitoring_providers import MonitoringProviderError
 from app.services.provider_factory import provider_for_device
 from app.services.metric_alerts import evaluate_metric_alerts
 from app.services.interface_metrics import enrich_interface_rates, selected_interfaces
-from app.services.notification.dispatcher import dispatch_persisted_notifications
+from app.services.notification.dispatcher import schedule_persisted_notification
 from app.services.collector_coordination import collector_coordinator
 from app.config import get_settings
 
@@ -215,6 +215,7 @@ class WindowsMonitoringEngine:
     async def _persist_check_result(self, device_id, services, diagnostics, capability_provider, provider_name, enabled_metrics,
                                     observed, elapsed, values, previous_storage, previous_collected_at, now):
         service_ids = [item.id for item in services]
+        pending_notifications = []
         async with async_session_factory() as db:
             device = await db.get(Device, device_id)
             if not device:
@@ -222,8 +223,10 @@ class WindowsMonitoringEngine:
             current_services = (await db.execute(select(DiscoveredService).where(
                 DiscoveredService.id.in_(service_ids)))).scalars().all() if service_ids else []
             for item in current_services:
-                await self._apply_service_result(
+                pending = await self._apply_service_result(
                     db, item, observed.get(item.name, "unknown"), None, elapsed, now, device.name)
+                if pending:
+                    pending_notifications.append(pending)
             if values is not None:
                 allowed = set(enabled_metrics)
                 raw_interfaces = selected_interfaces(values.get("network_interfaces"),
@@ -240,7 +243,7 @@ class WindowsMonitoringEngine:
                     storage={"disks": values.get("storage") or [] if "storage" in allowed else [],
                         **{key: value if key in allowed or (key == "network_adapters" and "network_interfaces" in allowed) else []
                            for key, value in details.items()}}))
-                await evaluate_metric_alerts(db, device, values, diagnostics)
+                pending_notifications.extend(await evaluate_metric_alerts(db, device, values, diagnostics))
                 if capability_provider:
                     capability = (await db.execute(select(DeviceCapability).where(
                         DeviceCapability.device_id == device_id,
@@ -249,6 +252,8 @@ class WindowsMonitoringEngine:
                     if capability:
                         capability.last_metric_collected_at = now
             await db.commit()
+        for title, message, severity, alert_id in pending_notifications:
+            schedule_persisted_notification(title, message, severity, alert_id)
 
     async def _apply_service_result(self, db, item, observed: str, error_code: str | None,
                                     response_ms: float, now: datetime, device_name: str):
@@ -272,9 +277,10 @@ class WindowsMonitoringEngine:
                 device_id=item.device_id, root_cause="SERVICE_DOWN")
             db.add(active); await db.flush()
             if item.notifications_enabled:
-                asyncio.create_task(dispatch_persisted_notifications(active.title, active.message, item.severity, active.id))
+                return active.title, active.message, item.severity, active.id
         elif item.monitor_state == "UP" and active:
             active.is_resolved = True; active.resolved_at = now
+        return None
 
 
 windows_monitoring_engine = WindowsMonitoringEngine()

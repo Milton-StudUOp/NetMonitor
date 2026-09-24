@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     COLLECTOR_DEVICE_CLAIM_LIMIT: int = 0
     REMOTE_MONITORING_CONCURRENCY: int = 10
     REMOTE_MONITORING_BATCH_SIZE: int = 0
+    # Outbound providers are slower than database operations. Keep their
+    # concurrency below the database pool and never hold a DB connection
+    # while waiting for an external service.
+    NOTIFICATION_CONCURRENCY: int = 4
 
     # State machine thresholds
     FAILURES_TO_DOWN: int = 3

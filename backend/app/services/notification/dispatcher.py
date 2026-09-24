@@ -1,8 +1,11 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 import structlog
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
+from app.config import get_settings
 from app.database import async_session_factory
 from app.models.alert import Alert
 from app.models.device import Device
@@ -13,6 +16,36 @@ from app.services.notification.channels import environment_email_integration, se
 
 logger = structlog.get_logger()
 SEVERITY_RANK = {"INFORMATION": 0, "WARNING": 1, "CRITICAL": 2}
+_dispatch_semaphore = asyncio.Semaphore(max(1, get_settings().NOTIFICATION_CONCURRENCY))
+_dispatch_tasks: set[asyncio.Task] = set()
+_inflight: set[tuple[int, bool]] = set()
+
+
+def schedule_persisted_notification(title: str, message: str, severity: str, alert_id: int,
+                                    recovery: bool = False) -> bool:
+    """Schedule one bounded dispatch per alert/kind and always retrieve errors."""
+    key = (alert_id, recovery)
+    if key in _inflight:
+        return False
+    _inflight.add(key)
+    task = asyncio.create_task(
+        dispatch_persisted_notifications(title, message, severity, alert_id, recovery)
+    )
+    _dispatch_tasks.add(task)
+
+    def completed(done: asyncio.Task) -> None:
+        _dispatch_tasks.discard(done)
+        _inflight.discard(key)
+        try:
+            done.result()
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:
+            logger.error("notification_dispatch_failed", alert_id=alert_id,
+                         error_type=type(exc).__name__)
+
+    task.add_done_callback(completed)
+    return True
 
 
 def _event_type(title: str, recovery: bool) -> str:
@@ -42,6 +75,13 @@ def _rule_matches(rule, event: str, original_event: str, severity: str, recovery
 
 
 async def dispatch_persisted_notifications(title: str, message: str, severity: str, alert_id: int, recovery: bool = False):
+    async with _dispatch_semaphore:
+        await _dispatch_bounded(title, message, severity, alert_id, recovery)
+
+
+async def _dispatch_bounded(title: str, message: str, severity: str, alert_id: int, recovery: bool) -> None:
+    # Snapshot all required configuration in a short transaction. External
+    # SMTP/HTTP/WhatsApp calls happen only after the connection is returned.
     async with async_session_factory() as db:
         event = _event_type(title, recovery)
         original_event = _event_type(title, False)
@@ -50,48 +90,62 @@ async def dispatch_persisted_notifications(title: str, message: str, severity: s
         rules = [rule for rule in rules if _rule_matches(
             rule, event, original_event, severity, recovery, f"{title} {message}"
         )]
-        if not rules: return
+        if not rules:
+            return
         now = datetime.now(timezone.utc)
         due_rules = []
-        deliveries = {}
         for rule in rules:
             delivery = (await db.execute(select(NotificationDelivery).where(
                 NotificationDelivery.alert_id == alert_id, NotificationDelivery.rule_id == rule.id))).scalar_one_or_none()
-            deliveries[rule.id] = delivery
             last_sent = delivery.last_sent_at.replace(tzinfo=timezone.utc) if delivery and delivery.last_sent_at.tzinfo is None else (delivery.last_sent_at if delivery else None)
             if recovery or delivery is None or (rule.reminder_minutes > 0 and now - last_sent >= timedelta(minutes=rule.reminder_minutes)):
                 due_rules.append(rule)
-        if not due_rules: return
+        if not due_rules:
+            return
         integrations = (await db.execute(select(NotificationIntegration).where(NotificationIntegration.enabled == True))).scalars().all()
         integrations_by_provider = {integration.provider: integration for integration in integrations}
         if "EMAIL" not in integrations_by_provider:
             environment_email = environment_email_integration()
             if environment_email:
                 integrations_by_provider["EMAIL"] = environment_email
-        delivered_rules = []
-        for rule in due_rules:
-            rule_sent = False
-            for channel in rule.channels or []:
-                integration = integrations_by_provider.get(channel)
-                if not integration:
-                    continue
-                try:
-                    delivery_severity = "INFORMATION" if recovery else severity
-                    await send_notification(integration, title, message, delivery_severity, rule.recipients or [], context)
-                    rule_sent = True
-                except Exception as exc:
-                    logger.error("persisted_notification_failed", provider=channel, rule_id=rule.id, error=type(exc).__name__)
-            if rule_sent:
-                delivered_rules.append(rule)
-        if delivered_rules:
-            for rule in delivered_rules:
-                delivery = deliveries[rule.id]
+        work = [(rule.id, list(rule.channels or []), list(rule.recipients or [])) for rule in due_rules]
+
+    delivered_rule_ids = []
+    for rule_id, channels, recipients in work:
+        rule_sent = False
+        for channel in channels:
+            integration = integrations_by_provider.get(channel)
+            if not integration:
+                continue
+            try:
+                delivery_severity = "INFORMATION" if recovery else severity
+                await send_notification(integration, title, message, delivery_severity, recipients, context)
+                rule_sent = True
+            except Exception as exc:
+                logger.error("persisted_notification_failed", provider=channel, rule_id=rule_id,
+                             error=type(exc).__name__)
+        if rule_sent:
+            delivered_rule_ids.append(rule_id)
+
+    if delivered_rule_ids:
+        async with async_session_factory() as db:
+            for rule_id in delivered_rule_ids:
+                delivery = (await db.execute(select(NotificationDelivery).where(
+                    NotificationDelivery.alert_id == alert_id,
+                    NotificationDelivery.rule_id == rule_id))).scalar_one_or_none()
                 if delivery:
                     delivery.last_sent_at = now; delivery.delivery_count += 1; delivery.last_kind = "RECOVERY" if recovery else "ALERT"
                 else:
-                    db.add(NotificationDelivery(alert_id=alert_id, rule_id=rule.id, last_sent_at=now,
+                    db.add(NotificationDelivery(alert_id=alert_id, rule_id=rule_id, last_sent_at=now,
                         delivery_count=1, last_kind="RECOVERY" if recovery else "ALERT"))
-            await db.commit()
+            try:
+                await db.commit()
+            except IntegrityError:
+                # Another process may have delivered the same alert while this
+                # worker was performing network I/O. The unique constraint is
+                # the final cross-process guard.
+                await db.rollback()
+                logger.info("notification_delivery_already_recorded", alert_id=alert_id)
 
 
 async def _notification_context(db, alert_id: int, event_type: str, recovery: bool) -> dict:
