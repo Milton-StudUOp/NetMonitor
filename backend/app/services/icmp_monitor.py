@@ -1,13 +1,48 @@
 import asyncio
+import os
 import platform
 import re
 import subprocess
 import structlog
+from time import monotonic
 
 from app.config import get_settings
 
 logger = structlog.get_logger()
 _icmp_process_limit = asyncio.Semaphore(max(1, get_settings().ICMP_PROCESS_CONCURRENCY))
+_error_log_state = {"last": 0.0, "suppressed": 0}
+
+try:
+    import resource
+except ImportError:  # pragma: no cover - unavailable on Windows
+    resource = None
+
+
+def _descriptor_capacity_available() -> bool:
+    """Keep enough descriptors for the API and database before spawning ping."""
+    if resource is None or not os.path.isdir("/proc/self/fd"):
+        return True
+    try:
+        soft_limit, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
+        if soft_limit <= 0 or soft_limit == resource.RLIM_INFINITY:
+            return True
+        open_count = len(os.listdir("/proc/self/fd"))
+        reserve = max(32, min(256, soft_limit // 10))
+        return open_count + 3 < soft_limit - reserve
+    except OSError:
+        return False
+
+
+def _probe_error(code: str) -> dict:
+    now = monotonic()
+    if now - _error_log_state["last"] >= 60:
+        logger.warning("icmp_probe_unavailable", code=code,
+                       suppressed=_error_log_state["suppressed"])
+        _error_log_state.update(last=now, suppressed=0)
+    else:
+        _error_log_state["suppressed"] += 1
+    return {"is_up": None, "latency_ms": None, "packet_loss_pct": None,
+            "probe_valid": False, "error_code": code}
 
 
 def _run_ping_sync(ip_address: str, count: int, timeout: float):
@@ -28,15 +63,24 @@ async def _run_ping_async(ip_address: str, count: int, timeout: float):
     process = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
     )
     try:
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout * count + 3.0)
-    except asyncio.TimeoutError:
-        process.kill()
-        await process.wait()
+        stdout, _ = await asyncio.wait_for(process.communicate(), timeout=timeout * count + 3.0)
+    except BaseException:
+        # Cancellation, timeout and unexpected runtime errors must never leave
+        # a child or its pipe attached to the long-running collector process.
+        if process.returncode is None:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+        try:
+            await asyncio.shield(process.communicate())
+        except (ProcessLookupError, RuntimeError):
+            pass
         raise
-    return process.returncode, stdout, stderr
+    return process.returncode, stdout, b""
 
 
 async def ping_target(ip_address: str, count: int = 2, timeout: float = 2.0) -> dict:
@@ -53,6 +97,8 @@ async def ping_target(ip_address: str, count: int = 2, timeout: float = 2.0) -> 
 
     try:
         async with _icmp_process_limit:
+            if not _descriptor_capacity_available():
+                return _probe_error("DESCRIPTOR_PRESSURE")
             if is_win:
                 returncode, stdout_bytes, stderr_bytes = await asyncio.to_thread(
                     _run_ping_sync, ip_address, count, timeout
@@ -120,6 +166,10 @@ async def ping_target(ip_address: str, count: int = 2, timeout: float = 2.0) -> 
         # A successful ping process is the portable availability signal. The
         # output is localized on some Linux distributions, so textual matches
         # are used only to extract metrics, not to decide whether the host is up.
+        # Linux iputils uses 1 for no replies and >1 for local execution
+        # errors. Never translate a collector/runtime failure into an outage.
+        if not is_win and returncode not in {0, 1}:
+            return _probe_error("PING_EXECUTION_FAILED")
         is_up = returncode == 0
 
         # If ping succeeded but its localized loss line was not recognized,
@@ -131,8 +181,15 @@ async def ping_target(ip_address: str, count: int = 2, timeout: float = 2.0) -> 
             "is_up": is_up,
             "latency_ms": avg_latency if is_up else None,
             "packet_loss_pct": packet_loss if is_up else 100.0,
+            "probe_valid": True,
+            "error_code": None,
         }
 
+    except asyncio.CancelledError:
+        raise
+    except asyncio.TimeoutError:
+        return _probe_error("PING_TIMEOUT")
+    except OSError as exc:
+        return _probe_error("DESCRIPTOR_EXHAUSTED" if exc.errno in {23, 24} else "PING_OS_ERROR")
     except Exception:
-        logger.warning("icmp_ping_error", error_type="ProbeExecutionError")
-        return {"is_up": False, "latency_ms": None, "packet_loss_pct": 100.0}
+        return _probe_error("PING_EXECUTION_FAILED")

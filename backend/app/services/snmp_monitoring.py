@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
+import asyncio
 
+from app.config import get_settings
 from app.services.monitoring_providers import CapabilityResult, MonitoringProvider, MonitoringProviderError
 
 
@@ -24,6 +26,7 @@ OID_HR_STORAGE_SIZE = "1.3.6.1.2.1.25.2.3.1.5"
 OID_HR_STORAGE_USED = "1.3.6.1.2.1.25.2.3.1.6"
 
 STATUS_LABELS = {1: "up", 2: "down", 3: "testing"}
+_snmp_transport_limit = asyncio.Semaphore(max(1, get_settings().SNMP_TRANSPORT_CONCURRENCY))
 IF_TYPE_LABELS = {
     6: "ethernet",
     24: "loopback",
@@ -56,52 +59,79 @@ class SNMPTransport:
     timeout: float = 2.0
     retries: int = 1
     _engine: Any = field(default=None, init=False, repr=False)
+    _engine_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
 
     async def get(self, *oids: str) -> dict[str, Any]:
         try:
             from pysnmp.hlapi.asyncio import ContextData, ObjectIdentity, ObjectType, SnmpEngine, get_cmd
         except Exception as exc:
             raise SNMPMonitoringError("SNMP_LIBRARY_UNAVAILABLE", "PySNMP is not available") from exc
-        engine = self._snmp_engine(SnmpEngine)
-        target = await self._target()
-        error_indication, error_status, error_index, var_binds = await get_cmd(
-            engine, self._auth(), target, ContextData(), *(ObjectType(ObjectIdentity(oid)) for oid in oids)
-        )
-        if error_indication or error_status:
-            raise SNMPMonitoringError("SNMP_QUERY_FAILED", str(error_indication or error_status))
-        return {str(name): value.prettyPrint() for name, value in var_binds}
+        try:
+            engine = await self._snmp_engine(SnmpEngine)
+            target = await self._target()
+            error_indication, error_status, error_index, var_binds = await get_cmd(
+                engine, self._auth(), target, ContextData(), *(ObjectType(ObjectIdentity(oid)) for oid in oids)
+            )
+            if error_indication or error_status:
+                raise SNMPMonitoringError("SNMP_QUERY_FAILED", str(error_indication or error_status))
+            return {str(name): value.prettyPrint() for name, value in var_binds}
+        except SNMPMonitoringError:
+            raise
+        except Exception as exc:
+            raise SNMPMonitoringError("SNMP_QUERY_FAILED", "SNMP query could not be completed") from exc
 
     async def walk(self, oid: str, limit: int = 500) -> dict[int, Any]:
         try:
             from pysnmp.hlapi.asyncio import ContextData, ObjectIdentity, ObjectType, SnmpEngine, walk_cmd
         except Exception as exc:
             raise SNMPMonitoringError("SNMP_LIBRARY_UNAVAILABLE", "PySNMP is not available") from exc
-        engine = self._snmp_engine(SnmpEngine)
-        target = await self._target()
-        rows: dict[int, Any] = {}
-        count = 0
-        async for error_indication, error_status, error_index, var_binds in walk_cmd(
-            engine, self._auth(), target, ContextData(), ObjectType(ObjectIdentity(oid)), lexicographicMode=False
-        ):
-            if error_indication or error_status:
-                raise SNMPMonitoringError("SNMP_WALK_FAILED", str(error_indication or error_status))
-            for name, value in var_binds:
-                suffix = str(name)
-                if not suffix.startswith(f"{oid}."):
-                    continue
-                try:
-                    rows[int(suffix.rsplit(".", 1)[-1])] = value.prettyPrint()
-                except ValueError:
-                    continue
-                count += 1
-                if count >= limit:
-                    return rows
-        return rows
+        try:
+            engine = await self._snmp_engine(SnmpEngine)
+            target = await self._target()
+            rows: dict[int, Any] = {}
+            count = 0
+            async for error_indication, error_status, error_index, var_binds in walk_cmd(
+                engine, self._auth(), target, ContextData(), ObjectType(ObjectIdentity(oid)), lexicographicMode=False
+            ):
+                if error_indication or error_status:
+                    raise SNMPMonitoringError("SNMP_WALK_FAILED", str(error_indication or error_status))
+                for name, value in var_binds:
+                    suffix = str(name)
+                    if not suffix.startswith(f"{oid}."):
+                        continue
+                    try:
+                        rows[int(suffix.rsplit(".", 1)[-1])] = value.prettyPrint()
+                    except ValueError:
+                        continue
+                    count += 1
+                    if count >= limit:
+                        return rows
+            return rows
+        except SNMPMonitoringError:
+            raise
+        except Exception as exc:
+            raise SNMPMonitoringError("SNMP_WALK_FAILED", "SNMP walk could not be completed") from exc
 
-    def _snmp_engine(self, factory):
-        if self._engine is None:
-            self._engine = factory()
+    async def _snmp_engine(self, factory):
+        async with self._engine_lock:
+            if self._engine is None:
+                await _snmp_transport_limit.acquire()
+                try:
+                    self._engine = factory()
+                except BaseException:
+                    _snmp_transport_limit.release()
+                    raise
         return self._engine
+
+    async def aclose(self) -> None:
+        """Deterministically close PySNMP's UDP dispatcher/socket."""
+        async with self._engine_lock:
+            engine, self._engine = self._engine, None
+        if engine is not None:
+            try:
+                engine.close_dispatcher()
+            finally:
+                _snmp_transport_limit.release()
 
     async def _target(self):
         from pysnmp.hlapi.asyncio import UdpTransportTarget
@@ -140,6 +170,11 @@ class SNMPTransport:
 class SNMPMonitoringProvider(MonitoringProvider):
     def __init__(self, transport: SNMPTransport):
         self.transport = transport
+
+    async def aclose(self) -> None:
+        close = getattr(self.transport, "aclose", None)
+        if close is not None:
+            await close()
 
     async def detect_capabilities(self) -> CapabilityResult:
         try:

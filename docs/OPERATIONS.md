@@ -34,6 +34,22 @@ The application also keeps MySQL connections, background discovery work, and
 WebSocket sessions bounded; increasing OS limits must not substitute for
 correct connection lifecycle management.
 
+ICMP execution failures such as descriptor pressure, a missing `ping` binary,
+or a cancelled subprocess are collector-health failures—not proof of a device
+outage. No communication sample is stored for an invalid probe; the last
+confirmed device state is preserved and the failure is shown only through
+`invalid_device_probe_count` in **System Health**. Invalid probes do not advance
+device failure/recovery hysteresis, change device or link state, or generate
+outage/recovery notifications. The collector also reserves descriptor
+headroom for API, database, and WebSocket traffic before starting a ping.
+
+SNMP uses a bounded pool of PySNMP engines (`SNMP_TRANSPORT_CONCURRENCY`, 16
+by default). Every scheduler, discovery, and API path closes its UDP dispatcher
+in `finally`; the engine limit is a second safety barrier against descriptor
+exhaustion. A database outage is retried with bounded exponential backoff, so
+it cannot create a five-second connection/log storm while the database is
+unavailable.
+
 The development frontend listens on port 3389 and proxies `/api` and `/ws` to `127.0.0.1:5555`. If Vite reports `ECONNREFUSED 127.0.0.1:5555`, verify that the backend is listening on port 5555. If a hot-reload module unexpectedly returns an empty response, restart Vite once with `npm run dev -- --host 0.0.0.0 --port 3389 --force`.
 
 Basic availability:

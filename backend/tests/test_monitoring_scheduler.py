@@ -6,6 +6,7 @@ from app.models.monitoring_provider import DeviceCapability
 from app.services.monitoring_engine import MonitoringEngine
 from app.services.windows_monitoring_engine import WindowsMonitoringEngine
 import app.services.monitoring_engine as monitoring_module
+import app.services.icmp_monitor as icmp_module
 
 
 def test_device_probe_schedule_uses_persisted_last_probe_time():
@@ -78,3 +79,29 @@ async def test_one_thousand_device_probes_respect_the_configured_concurrency(mon
 
     assert len(results) == 1000
     assert peak == 23
+
+
+@pytest.mark.asyncio
+async def test_local_ping_resource_failure_is_not_reported_as_device_down(monkeypatch):
+    async def fail(*_args, **_kwargs):
+        raise OSError(24, "Too many open files")
+
+    monkeypatch.setattr(icmp_module, "_run_ping_async", fail)
+    result = await icmp_module.ping_target("192.0.2.20")
+
+    assert result["probe_valid"] is False
+    assert result["is_up"] is None
+    assert result["packet_loss_pct"] is None
+    assert result["error_code"] == "DESCRIPTOR_EXHAUSTED"
+
+
+@pytest.mark.asyncio
+async def test_ping_execution_error_is_not_reported_as_packet_loss(monkeypatch):
+    async def invalid(*_args, **_kwargs):
+        return 2, b"ping: socket: Too many open files", b""
+
+    monkeypatch.setattr(icmp_module, "_run_ping_async", invalid)
+    result = await icmp_module.ping_target("192.0.2.21")
+
+    assert result["probe_valid"] is False
+    assert result["error_code"] == "PING_EXECUTION_FAILED"

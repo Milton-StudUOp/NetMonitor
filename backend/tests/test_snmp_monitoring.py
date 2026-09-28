@@ -18,6 +18,8 @@ from app.services.snmp_monitoring import (
     OID_SYS_DESCR,
     OID_SYS_UPTIME,
     SNMPMonitoringProvider,
+    SNMPSecurity,
+    SNMPTransport,
 )
 
 
@@ -108,3 +110,19 @@ async def test_snmp_interface_picker_uses_compact_inventory_walks_only():
     assert interfaces == [{"index": 1, "name": "eth0", "type": "ethernet",
                            "speed_bps": 1_000_000_000, "oper_status": "up"}]
     assert transport.walked == [OID_IF_DESCR, OID_IF_TYPE, OID_IF_SPEED, OID_IF_OPER_STATUS]
+
+
+@pytest.mark.asyncio
+async def test_snmp_transport_closes_dispatcher_exactly_once():
+    class FakeEngine:
+        def __init__(self): self.closed = 0
+        def close_dispatcher(self): self.closed += 1
+
+    transport = SNMPTransport("192.0.2.30", SNMPSecurity(community="test"))
+    engine = await transport._snmp_engine(FakeEngine)
+
+    await transport.aclose()
+    await transport.aclose()
+
+    assert engine.closed == 1
+    assert transport._engine is None

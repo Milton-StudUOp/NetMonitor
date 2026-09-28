@@ -138,20 +138,29 @@ def _guess_type(ports: list[int], model: str | None = None, hostname: str | None
 
 
 async def _snmp_identity(ip: str, request: DiscoveryRequest, timeout: float) -> dict:
+    from app.services.snmp_monitoring import SNMPSecurity, SNMPTransport
+    security = SNMPSecurity(
+        version=request.snmp_version,
+        community=request.snmp_community,
+        username=request.snmp_username,
+        auth_key=request.snmp_auth_key,
+        priv_key=request.snmp_priv_key,
+    )
+    transport = SNMPTransport(ip, security, timeout=timeout, retries=0)
     try:
-        from pysnmp.hlapi.asyncio import CommunityData, ContextData, ObjectIdentity, ObjectType, SnmpEngine, UdpTransportTarget, UsmUserData, getCmd
-        auth = UsmUserData(request.snmp_username or "", request.snmp_auth_key, request.snmp_priv_key) if request.snmp_version == "3" else CommunityData(request.snmp_community, mpModel=1)
-        engine = SnmpEngine(); transport = UdpTransportTarget((ip, 161), timeout=timeout, retries=0)
-        error, error_status, _, bindings = await asyncio.wait_for(getCmd(engine, auth, transport, ContextData(), ObjectType(ObjectIdentity("1.3.6.1.2.1.1.5.0")), ObjectType(ObjectIdentity("1.3.6.1.2.1.1.1.0")), ObjectType(ObjectIdentity("1.3.6.1.2.1.1.2.0")), ObjectType(ObjectIdentity("1.3.6.1.2.1.1.7.0"))), timeout + .5)
-        if error or error_status or len(bindings) < 2: return {}
-        sys_name, description = str(bindings[0][1]), str(bindings[1][1])
-        object_id = str(bindings[2][1]) if len(bindings) > 2 else None
-        try: sys_services = int(bindings[3][1]) if len(bindings) > 3 else None
+        oids = ("1.3.6.1.2.1.1.5.0", "1.3.6.1.2.1.1.1.0", "1.3.6.1.2.1.1.2.0", "1.3.6.1.2.1.1.7.0")
+        values = await asyncio.wait_for(transport.get(*oids), timeout + .5)
+        sys_name, description = str(values.get(oids[0], "")), str(values.get(oids[1], ""))
+        if not sys_name and not description: return {}
+        object_id = values.get(oids[2])
+        try: sys_services = int(values.get(oids[3])) if values.get(oids[3]) is not None else None
         except (TypeError, ValueError): sys_services = None
         vendor = next((name for name in ["Cisco", "Juniper", "Huawei", "MikroTik", "Fortinet", "Ubiquiti", "Aruba", "HPE", "Dell", "Ruckus", "Palo Alto", "SonicWall", "VMware"] if name.lower() in description.lower()), None)
         return {"hostname": sys_name, "snmp_available": True, "manufacturer": vendor, "model": description[:128], "sys_object_id": object_id, "sys_services": sys_services, "interfaces": []}
     except Exception:
         return {}
+    finally:
+        await transport.aclose()
 
 
 def _job_view(job: dict) -> dict:

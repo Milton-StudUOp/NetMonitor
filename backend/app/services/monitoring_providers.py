@@ -18,6 +18,10 @@ class CapabilityResult:
 
 
 class MonitoringProvider(ABC):
+    async def aclose(self) -> None:
+        """Release provider transports. Stateless providers need no action."""
+        return None
+
     @abstractmethod
     async def detect_capabilities(self) -> CapabilityResult: ...
 

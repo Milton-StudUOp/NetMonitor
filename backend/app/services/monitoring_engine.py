@@ -2,6 +2,7 @@ import asyncio
 import structlog
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import delete, or_, select, update
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import selectinload
 
 from app.database import async_session_factory
@@ -58,9 +59,11 @@ class MonitoringEngine:
         self.last_cycle_error: str | None = None
         self.completed_cycles = 0
         self.failed_cycles = 0
+        self.database_failure_streak = 0
         self.last_device_probe_count = 0
         self.last_deferred_device_probe_count = 0
         self.last_claimed_device_probe_count = 0
+        self.last_invalid_device_probe_count = 0
 
     async def load_configuration(self):
         async with async_session_factory() as db:
@@ -111,6 +114,7 @@ class MonitoringEngine:
     async def _main_loop(self):
         while self._running:
             self.last_cycle_started_at = datetime.now(timezone.utc)
+            next_interval = self._cycle_interval
             try:
                 async with async_session_factory() as db:
                     await self._probe_all_devices(db)
@@ -123,8 +127,23 @@ class MonitoringEngine:
                 self.last_cycle_completed_at = datetime.now(timezone.utc)
                 self.last_cycle_duration_seconds = (self.last_cycle_completed_at - self.last_cycle_started_at).total_seconds()
                 self.last_cycle_error = None; self.completed_cycles += 1
+                self.database_failure_streak = 0
             except asyncio.CancelledError:
                 break
+            except OperationalError as error:
+                self.last_cycle_error = "OperationalError"; self.failed_cycles += 1
+                self.database_failure_streak += 1
+                next_interval = max(self._cycle_interval, min(60, 2 ** min(self.database_failure_streak, 6)))
+                original = getattr(error, "orig", None)
+                args = getattr(original, "args", ())
+                # Report the database code without leaking connection details.
+                # Backoff prevents a database/network outage from becoming a
+                # tight retry and log storm in the API process.
+                if self.database_failure_streak == 1 or self.database_failure_streak in {2, 4, 8, 16, 32}:
+                    logger.warning("monitoring_database_unavailable",
+                        database_code=args[0] if args else None,
+                        retry_seconds=next_interval,
+                        consecutive_failures=self.database_failure_streak)
             except Exception as e:
                 self.last_cycle_error = type(e).__name__; self.failed_cycles += 1
                 logger.error("monitoring_engine_loop_error", error_type=type(e).__name__)
@@ -132,7 +151,7 @@ class MonitoringEngine:
             # Keep the configured cadence measured from the start of the
             # preceding cycle. A slow cycle must not add a second full delay.
             elapsed = (datetime.now(timezone.utc) - self.last_cycle_started_at).total_seconds()
-            await asyncio.sleep(max(0, self._cycle_interval - elapsed))
+            await asyncio.sleep(max(0, next_interval - elapsed))
 
     async def _maintenance_loop(self):
         while self._running:
@@ -235,11 +254,21 @@ class MonitoringEngine:
             if (device.ip_address or "").strip()
         }
         status_events: list[dict] = []
+        self.last_invalid_device_probe_count = sum(
+            result.get("probe_valid", True) is False for _, result in probe_results
+        )
 
         for device, ping_res in probe_results:
             if not device.ip_address:
                 continue
             self._latest_device_probes[device.id] = ping_res
+            if ping_res.get("probe_valid", True) is False:
+                # A local collector failure is not evidence that the device is
+                # down. Preserve hysteresis and operational state and do not
+                # manufacture an UNKNOWN communication sample. System Health
+                # reports the collector error separately.
+                device.last_monitored_at = now
+                continue
             is_up = ping_res["is_up"]
             dependency_down, dependency_reason = await self._detect_downstream_dependency(
                 device, gateway_ping_cache, probe_by_ip)
@@ -372,7 +401,10 @@ class MonitoringEngine:
         if gateway_ip and gateway_ip != (device.ip_address or "").strip():
             if gateway_ip not in gateway_ping_cache:
                 gateway_ping_cache[gateway_ip] = probe_by_ip.get(gateway_ip) or await ping_target(gateway_ip, count=1)
-            if not gateway_ping_cache[gateway_ip]["is_up"]:
+            gateway_result = gateway_ping_cache[gateway_ip]
+            if gateway_result.get("probe_valid", True) is False:
+                return False, None
+            if not gateway_result["is_up"]:
                 return True, f"The gateway did not respond to ICMP probes: {gateway_ip}."
 
         return False, None

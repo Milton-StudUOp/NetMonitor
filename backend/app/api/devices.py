@@ -493,6 +493,8 @@ async def _test_snmp_connection(device: Device, data: SNMPConnectionInput, secre
             connectivity=exc.code not in {"SNMP_UNAVAILABLE", "SNMP_QUERY_FAILED", "SNMP_WALK_FAILED"},
             snmp=False, authentication=exc.code not in {"SNMP_AUTHENTICATION_FAILED"},
             status="FAILED", error_code=exc.code, message=str(exc), discovered_at=now)
+    finally:
+        await provider.aclose()
 
 
 @router.post("/{device_id}/snmp-monitoring/test-candidate", response_model=SNMPCapabilityRead, dependencies=[Depends(require_operator)])

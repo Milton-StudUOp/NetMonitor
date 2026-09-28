@@ -128,6 +128,7 @@ class WindowsMonitoringEngine:
         # database connection from the API pool.
         async with self._semaphore:
             scope = f"remote-check:{device_id}"
+            provider = None
             if not claimed and not await collector_coordinator.claim(scope):
                 return
             try:
@@ -156,6 +157,12 @@ class WindowsMonitoringEngine:
                 logger.warning("remote_monitoring_device_failed", device_id=device_id,
                     error_type=type(exc).__name__)
             finally:
+                if provider is not None:
+                    try:
+                        await provider.aclose()
+                    except Exception as exc:
+                        logger.warning("remote_provider_close_failed", device_id=device_id,
+                                       error_type=type(exc).__name__)
                 await collector_coordinator.release(scope)
 
     async def _load_check_context(self, device_id: int, now: datetime):

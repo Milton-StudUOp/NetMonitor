@@ -41,6 +41,11 @@ async def _provider(db: AsyncSession, device: Device):
     except MonitoringProviderError as exc: raise HTTPException(400, {"code":exc.code,"message":str(exc)}) from exc
 
 
+async def _close_provider(provider) -> None:
+    if provider is not None:
+        await provider.aclose()
+
+
 def _supported_metrics(capability: DeviceCapability | None) -> dict[str, bool]:
     values = capability.capabilities if capability and isinstance(capability.capabilities, dict) else {}
     return {
@@ -115,9 +120,11 @@ async def discover_services(device_id: int, db: AsyncSession = Depends(get_db)):
     if device.status != DeviceStatus.ONLINE: raise HTTPException(409, "Device must be online before discovery")
     provider, provider_name = await _provider(db, device)
     if provider_name == "SNMP":
+        await _close_provider(provider)
         raise HTTPException(409, "SNMP provides metrics only; use Metrics Discovery for this device")
     try: discovered = await provider.discover_services()
     except MonitoringProviderError as exc: raise HTTPException(409, {"code": exc.code, "message": str(exc)}) from exc
+    finally: await _close_provider(provider)
     inventory = (await db.execute(select(DiscoveredService).where(
         DiscoveredService.device_id == device_id))).scalars().all()
     for stale in inventory:
@@ -244,10 +251,12 @@ async def collect_metrics(device_id: int, db: AsyncSession = Depends(get_db)):
     device = await db.get(Device, device_id)
     if not device: raise HTTPException(404, "Device not found")
     if device.status != DeviceStatus.ONLINE: raise HTTPException(409, "Device must be online before metrics collection")
+    provider = None
     try:
         provider, provider_name = await _provider(db, device)
         values = await provider.collect_system_metrics()
     except MonitoringProviderError as exc: raise HTTPException(409, {"code": exc.code, "message": str(exc)}) from exc
+    finally: await _close_provider(provider)
     capability = (await db.execute(select(DeviceCapability).where(
         DeviceCapability.device_id == device_id,
         DeviceCapability.provider == provider_name))).scalar_one_or_none()
@@ -286,10 +295,12 @@ async def list_metrics(device_id: int, limit: int = Query(100, ge=1, le=1000), d
 async def metric_capabilities(device_id: int, db: AsyncSession = Depends(get_db)):
     device = await db.get(Device, device_id)
     if not device: raise HTTPException(404, "Device not found")
+    provider = None
     try:
         provider, provider_name = await _provider(db, device)
         capabilities = await provider.discover_metric_capabilities()
     except MonitoringProviderError as exc: raise HTTPException(409, {"code": exc.code, "message": str(exc)}) from exc
+    finally: await _close_provider(provider)
     saved = (await db.execute(select(DeviceCapability).where(DeviceCapability.device_id == device_id,
         DeviceCapability.provider == provider_name))).scalar_one_or_none()
     if not saved:
@@ -312,11 +323,15 @@ async def metric_interfaces(device_id: int, db: AsyncSession = Depends(get_db)):
     device = await db.get(Device, device_id)
     if not device: raise HTTPException(404, "Device not found")
     provider, provider_name = await _provider(db, device)
-    if provider_name != "SNMP": raise HTTPException(409, "Interface selection is available for SNMP integrations")
+    if provider_name != "SNMP":
+        await _close_provider(provider)
+        raise HTTPException(409, "Interface selection is available for SNMP integrations")
     try:
         interfaces = await provider.discover_interfaces()
     except MonitoringProviderError as exc:
         raise HTTPException(409, {"code": exc.code, "message": str(exc)}) from exc
+    finally:
+        await _close_provider(provider)
     capability = (await db.execute(select(DeviceCapability).where(DeviceCapability.device_id == device_id,
         DeviceCapability.provider == provider_name))).scalar_one_or_none()
     return {"interfaces": interfaces,
@@ -327,7 +342,8 @@ async def metric_interfaces(device_id: int, db: AsyncSession = Depends(get_db)):
 async def configure_metrics(device_id: int, payload: dict = Body(...), db: AsyncSession = Depends(get_db)):
     device = await db.get(Device, device_id)
     if not device: raise HTTPException(404, "Device not found")
-    _, provider_name = await _provider(db, device)
+    provider, provider_name = await _provider(db, device)
+    await _close_provider(provider)
     item = (await db.execute(select(DeviceCapability).where(DeviceCapability.device_id == device_id,
         DeviceCapability.provider == provider_name))).scalar_one_or_none()
     if not item:
