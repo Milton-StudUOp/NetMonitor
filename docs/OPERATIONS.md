@@ -247,6 +247,27 @@ An empty local SQLite file does not prove data loss when the installation previo
 
 ## Validation commands
 
+### Database pool saturation during authentication
+
+`QueuePool limit ... reached` means requests exhausted the available database
+connections; it does not by itself indicate a process crash or insufficient RAM.
+Authentication must complete its transaction before an endpoint obtains a second
+connection. Holding both transactions across the request can exhaust the bounded
+pool during concurrent dashboard queries.
+
+The HTTP middleware releases the authentication connection before dispatching the
+endpoint. Account mutations start a new transaction in the same session. Pool
+timeouts return HTTP 503 with `DATABASE_BUSY` and `Retry-After: 5`, preserving the
+browser's authentication token. Failed account commits return an error rather
+than reporting success. Restart the API process to load this change.
+
+The regression tests in `backend/tests/test_auth_pool.py` use a disposable SQLite
+database and a single-connection pool to check concurrent requests, account
+updates, logout, saturation, and failed commits. These tests do not establish
+production capacity or replace load testing against the deployed database.
+
+### Local checks
+
 ```bash
 cd backend
 source venv/bin/activate

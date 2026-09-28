@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 import logging
 import structlog
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError, SQLAlchemyError
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -82,6 +83,16 @@ ADMIN_ONLY_PREFIXES = ("/api/system-health", "/api/auth/users", "/api/platform/d
 
 @app.middleware("http")
 async def authentication(request: Request, call_next):
+    try:
+        return await _authenticate_request(request, call_next)
+    except PoolTimeoutError:
+        return JSONResponse(status_code=503, headers={"Retry-After": "5"}, content={
+            "detail": "Database is busy. Please try again shortly.",
+            "code": "DATABASE_BUSY",
+        })
+
+
+async def _authenticate_request(request: Request, call_next):
     # CORS preflight never carries application credentials.
     if request.method == "OPTIONS" or settings.AUTH_DISABLED or request.url.path in PUBLIC_PATHS:
         return await call_next(request)
@@ -93,11 +104,14 @@ async def authentication(request: Request, call_next):
         if not authenticated:
             return JSONResponse(status_code=401, content={"detail":"Session is invalid or expired"})
         user, session = authenticated
+        # End the authentication transaction BEFORE the endpoint obtains its
+        # own connection. Otherwise concurrent requests can occupy the entire
+        # pool while each waits for a second connection. expire_on_commit=False
+        # keeps the loaded identity available without issuing another query.
+        await db.commit()
         request.state.user = user
         request.state.auth_session = session
-        # Protected handlers that mutate the authenticated account must reuse
-        # this transaction. Opening a second session can deadlock on MySQL
-        # while this authentication transaction remains active.
+        # Account mutations reuse this session and start a new transaction.
         request.state.auth_db = db
         if database.migration_in_progress and request.method not in {"GET", "HEAD", "OPTIONS"}:
             return JSONResponse(status_code=503, content={"detail":"Database migration is in progress; changes are temporarily disabled"})
@@ -117,9 +131,16 @@ async def authentication(request: Request, call_next):
         if bool(db.dirty or db.new or db.deleted) or getattr(request.state, "logout_requested", False):
             try:
                 await db.commit()
-            except Exception as exc:
+            except PoolTimeoutError:
                 await db.rollback()
-                logger.warning("auth_session_commit_suppressed", error=str(exc))
+                raise
+            except SQLAlchemyError as exc:
+                await db.rollback()
+                logger.warning("auth_session_commit_failed", error_type=type(exc).__name__)
+                return JSONResponse(status_code=503, content={
+                    "detail": "Unable to save account changes. Please try again.",
+                    "code": "ACCOUNT_SAVE_FAILED",
+                })
         return response
 
 # Include Routers
