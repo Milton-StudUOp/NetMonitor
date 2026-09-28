@@ -4,6 +4,8 @@ from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.device import DeviceStatus, DeviceType
+from app.models.link import LinkType
+from app.schemas.link import LinkRead
 
 
 class DeviceBase(BaseModel):
@@ -29,6 +31,16 @@ class DeviceBase(BaseModel):
 
 class DeviceCreate(DeviceBase):
     pass
+
+
+class DeviceRedundantCreate(BaseModel):
+    """Atomically register a device and its two upstream redundancy links."""
+
+    device: DeviceCreate
+    redundancy_group_id: int
+    link_type: LinkType = LinkType.OTHER
+    link_monitoring_interval: int = Field(default=5, ge=1)
+    links_are_critical: bool = True
 
 
 class DeviceUpdate(BaseModel):
@@ -61,6 +73,12 @@ class DeviceRead(DeviceBase):
     updated_at: datetime
     snmp_community: Optional[str] = Field(default=None, exclude=True)
     snmp_configured: bool = False
+
+
+class DeviceRedundantRead(BaseModel):
+    device: DeviceRead
+    primary_link: LinkRead
+    secondary_link: LinkRead
 
 
 class DeviceStatusRead(BaseModel):

@@ -15,6 +15,7 @@ export default function Devices({ user }) {
   const navigate = useNavigate();
   const [devices, setDevices] = useState([]);
   const [links, setLinks] = useState([]);
+  const [redundancyGroups, setRedundancyGroups] = useState([]);
   const [icons, setIcons] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState('ALL');
@@ -24,6 +25,8 @@ export default function Devices({ user }) {
   const [pingResult, setPingResult] = useState({});
   const [pingingId, setPingingId] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [feedback, setFeedback] = useState('');
 
   const initialFormState = {
     name: '',
@@ -42,6 +45,11 @@ export default function Devices({ user }) {
     monitoring_method: 'ICMP',
     is_critical: true,
     monitoring_interval: 30,
+    connectivity_mode: 'SINGLE',
+    redundancy_group_id: '',
+    link_type: 'OTHER',
+    link_monitoring_interval: 5,
+    links_are_critical: true,
   };
 
   const [formData, setFormData] = useState(initialFormState);
@@ -68,6 +76,7 @@ export default function Devices({ user }) {
     fetchDevices();
     fetchLinks();
     api.get('/platform/icons').then((res) => setIcons(res.data)).catch(() => {});
+    api.get('/redundancy-groups').then((res) => setRedundancyGroups(res.data)).catch(() => setRedundancyGroups([]));
   }, []);
 
   const handleOpenAdd = () => {
@@ -77,6 +86,16 @@ export default function Devices({ user }) {
   };
 
   const handleOpenEdit = (dev) => {
+    const explicitPrimaryLink = links.find((link) => link.id === dev.primary_link_id);
+    const discoveredPrimaryLinks = links.filter((link) => link.destination_device_id === dev.id && link.priority === 'PRIMARY');
+    const primaryLink = explicitPrimaryLink || (discoveredPrimaryLinks.length === 1 ? discoveredPrimaryLinks[0] : null);
+    const secondaryLinks = links.filter((link) => link.destination_device_id === dev.id && link.priority === 'SECONDARY');
+    const secondaryLink = secondaryLinks.length === 1 ? secondaryLinks[0] : null;
+    const matchingGroup = primaryLink && secondaryLink
+      ? redundancyGroups.find((group) => group.redundancy_type === 'DEVICE'
+        && group.primary_device_id === primaryLink.source_device_id
+        && group.secondary_device_id === secondaryLink.source_device_id)
+      : null;
     setEditingId(dev.id);
     setFormData({
       name: dev.name || '',
@@ -95,13 +114,47 @@ export default function Devices({ user }) {
       monitoring_method: dev.monitoring_method || 'ICMP',
       is_critical: dev.is_critical ?? true,
       monitoring_interval: dev.monitoring_interval || 30,
+      connectivity_mode: matchingGroup ? 'REDUNDANT' : 'SINGLE',
+      redundancy_group_id: matchingGroup?.id || '',
+      link_type: primaryLink?.link_type || secondaryLink?.link_type || 'OTHER',
+      link_monitoring_interval: primaryLink?.monitoring_interval || secondaryLink?.monitoring_interval || 5,
+      links_are_critical: primaryLink?.is_critical ?? secondaryLink?.is_critical ?? true,
     });
     setIsModalOpen(true);
   };
 
+  // The groups and links are loaded independently. If an operator opens Edit
+  // before both requests finish, reconcile the legacy relationship as soon as
+  // the remaining inventory arrives instead of showing a false SINGLE state.
+  useEffect(() => {
+    if (!isModalOpen || !editingId) return;
+    const dev = devices.find((item) => item.id === editingId);
+    if (!dev) return;
+    const explicitPrimary = links.find((link) => link.id === dev.primary_link_id);
+    const primaryCandidates = links.filter((link) => link.destination_device_id === dev.id && link.priority === 'PRIMARY');
+    const secondaryCandidates = links.filter((link) => link.destination_device_id === dev.id && link.priority === 'SECONDARY');
+    const primary = explicitPrimary || (primaryCandidates.length === 1 ? primaryCandidates[0] : null);
+    const secondary = secondaryCandidates.length === 1 ? secondaryCandidates[0] : null;
+    const group = primary && secondary ? redundancyGroups.find((item) => item.redundancy_type === 'DEVICE'
+      && item.primary_device_id === primary.source_device_id
+      && item.secondary_device_id === secondary.source_device_id) : null;
+    if (!group) return;
+    setFormData((current) => current.connectivity_mode === 'REDUNDANT' ? current : ({
+      ...current,
+      connectivity_mode: 'REDUNDANT',
+      redundancy_group_id: group.id,
+      link_type: primary.link_type || secondary.link_type || 'OTHER',
+      link_monitoring_interval: primary.monitoring_interval || secondary.monitoring_interval || 5,
+      links_are_critical: primary.is_critical ?? secondary.is_critical ?? true,
+    }));
+  }, [isModalOpen, editingId, devices, links, redundancyGroups]);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-    const { primary_link_id, ...deviceFields } = formData;
+    const {
+      primary_link_id, connectivity_mode, redundancy_group_id, link_type,
+      link_monitoring_interval, links_are_critical, ...deviceFields
+    } = formData;
     const payload = {
       ...deviceFields,
       gateway_ip_address: formData.gateway_ip_address || null,
@@ -111,16 +164,39 @@ export default function Devices({ user }) {
         primary_link_id: primary_link_id ? Number(primary_link_id) : null,
       }),
     };
+    setSaving(true);
+    setFeedback('');
     try {
-      if (editingId) {
+      if (editingId && connectivity_mode === 'REDUNDANT') {
+        await api.put(`/devices/with-redundant-links/${editingId}`, {
+          device: payload,
+          redundancy_group_id: Number(redundancy_group_id),
+          link_type,
+          link_monitoring_interval: Number(link_monitoring_interval),
+          links_are_critical,
+        });
+      } else if (editingId) {
         await api.put(`/devices/${editingId}`, payload);
+      } else if (connectivity_mode === 'REDUNDANT') {
+        await api.post('/devices/with-redundant-links', {
+          device: payload,
+          redundancy_group_id: Number(redundancy_group_id),
+          link_type,
+          link_monitoring_interval: Number(link_monitoring_interval),
+          links_are_critical,
+        });
       } else {
         await api.post('/devices', payload);
       }
       setIsModalOpen(false);
       await Promise.all([fetchDevices(), fetchLinks()]);
+      setFeedback(connectivity_mode === 'REDUNDANT' && !editingId
+        ? 'Device registered with primary and secondary links.'
+        : `Device ${editingId ? 'updated' : 'registered'} successfully.`);
     } catch (err) {
       alert('Error saving device: ' + getApiErrorMessage(err));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -168,10 +244,17 @@ export default function Devices({ user }) {
     return matchesSearch && matchesType;
   });
   const visibleDevices = filteredDevices.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const deviceRedundancyGroups = redundancyGroups.filter((group) => group.redundancy_type === 'DEVICE' && group.primary_device && group.secondary_device);
+  const selectedRedundancyGroup = deviceRedundancyGroups.find((group) => String(group.id) === String(formData.redundancy_group_id));
+  const editingHasSecondaryLink = Boolean(editingId && links.some((link) => link.destination_device_id === editingId && link.priority === 'SECONDARY'));
+  const primaryLinkFor = (device) => links.find((link) => link.id === device.primary_link_id)
+    || links.find((link) => link.destination_device_id === device.id && link.priority === 'PRIMARY');
+  const secondaryLinkFor = (device) => links.find((link) => link.destination_device_id === device.id && link.priority === 'SECONDARY');
   useEffect(() => { setPage(current => Math.min(current, Math.max(1, Math.ceil(filteredDevices.length / PAGE_SIZE)))); }, [filteredDevices.length]);
 
   return (
     <div className="data-page">
+      {feedback && <div className="notice success" role="status">{feedback}</div>}
       {/* Action Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
         <div>
@@ -272,13 +355,13 @@ export default function Devices({ user }) {
                   <td>{d.location || '—'}</td>
                   <td>
                     <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', color: 'var(--text-main)' }}>
-                      {d.gateway_ip_address || '—'}
+                      {d.gateway_ip_address || devices.find((item) => item.id === primaryLinkFor(d)?.source_device_id)?.ip_address || '—'}
                     </div>
                     <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
-                      {devices.find(dev => dev.id === d.gateway_device_id)?.name || 'Gateway not assigned'}
+                      Primary: {devices.find((item) => item.id === (d.gateway_device_id || primaryLinkFor(d)?.source_device_id))?.name || 'Not assigned'}
                     </div>
                     <div style={{ fontSize: '0.72rem', color: 'var(--text-dim)' }}>
-                      {links.find(link => link.id === d.primary_link_id)?.name || 'Primary link not assigned'}
+                      Secondary: {devices.find((item) => item.id === secondaryLinkFor(d)?.source_device_id)?.name || 'Not assigned'}
                     </div>
                   </td>
                   <td>
@@ -426,7 +509,36 @@ export default function Devices({ user }) {
               </div>
             </div>
 
-            <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">Connectivity</label>
+              <select className="form-select" value={formData.connectivity_mode} onChange={(e) => setFormData({ ...formData, connectivity_mode: e.target.value, gateway_device_id: '' })}>
+                <option value="SINGLE" disabled={editingHasSecondaryLink}>Single gateway / primary link</option>
+                <option value="REDUNDANT">Primary and secondary links</option>
+              </select>
+              <small className="field-hint">Redundant registration creates the device and both links in one atomic operation.</small>
+            </div>
+
+            {formData.connectivity_mode === 'REDUNDANT' && <div className="device-redundancy-config">
+              <div className="form-group">
+                <label className="form-label">Upstream redundancy group *</label>
+                <select className="form-select" required value={formData.redundancy_group_id} onChange={(e) => setFormData({ ...formData, redundancy_group_id: e.target.value })}>
+                  <option value="">Select a device redundancy group</option>
+                  {deviceRedundancyGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+                </select>
+                {!deviceRedundancyGroups.length && <small className="field-hint">Create a DEVICE redundancy group first, with primary and secondary upstream devices.</small>}
+              </div>
+              {selectedRedundancyGroup && <div className="redundancy-path-preview">
+                <div><span>Primary path</span><strong>{selectedRedundancyGroup.primary_device.name}</strong><small>{selectedRedundancyGroup.primary_device.ip_address || 'No IP address'}</small></div>
+                <div><span>Secondary path</span><strong>{selectedRedundancyGroup.secondary_device.name}</strong><small>{selectedRedundancyGroup.secondary_device.ip_address || 'No IP address'}</small></div>
+              </div>}
+              <div className="form-row">
+                <div className="form-group"><label className="form-label">Link type</label><select className="form-select" value={formData.link_type} onChange={(e) => setFormData({ ...formData, link_type: e.target.value })}><option value="OTHER">Other</option><option value="FIBER">Fiber</option><option value="ETHERNET">Ethernet</option><option value="RADIO">Radio</option><option value="VPN">VPN</option></select></div>
+                <div className="form-group"><label className="form-label">Link check interval (seconds)</label><input className="form-input" type="number" min="1" required value={formData.link_monitoring_interval} onChange={(e) => setFormData({ ...formData, link_monitoring_interval: e.target.value })}/></div>
+              </div>
+              <label className="check-line"><input type="checkbox" checked={formData.links_are_critical} onChange={(e) => setFormData({ ...formData, links_are_critical: e.target.checked })}/>Treat both connectivity paths as critical</label>
+            </div>}
+
+            {formData.connectivity_mode !== 'REDUNDANT' && <div className="form-row">
               <div className="form-group">
                 <label className="form-label">Gateway IP</label>
                 <input
@@ -455,9 +567,9 @@ export default function Devices({ user }) {
                     ))}
                 </select>
               </div>
-            </div>
+            </div>}
 
-            <div className="form-group">
+            {formData.connectivity_mode !== 'REDUNDANT' && <div className="form-group">
               <label className="form-label">Primary Link</label>
               <select
                 className="form-select"
@@ -474,7 +586,7 @@ export default function Devices({ user }) {
                     </option>
                   ))}
               </select>
-            </div>
+            </div>}
 
             <div className="form-group">
               <label className="form-label">Physical Location / Rack</label>
@@ -535,8 +647,8 @@ export default function Devices({ user }) {
             <button type="button" className="btn btn-secondary" onClick={() => setIsModalOpen(false)}>
               Cancel
             </button>
-            <button type="submit" className="btn btn-primary">
-              {editingId ? 'Update Device' : 'Register Device'}
+            <button type="submit" className="btn btn-primary" disabled={saving}>
+              {saving ? 'Saving…' : editingId ? 'Update Device' : formData.connectivity_mode === 'REDUNDANT' ? 'Register Device & Both Links' : 'Register Device'}
             </button>
           </div>
         </form>

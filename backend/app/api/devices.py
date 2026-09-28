@@ -10,8 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.device import Device, DeviceStatus
 from app.models.link import Link, LinkPriority, LinkStatus, LinkType
+from app.models.redundancy_group import RedundancyGroup, RedundancyType
 from app.models.monitoring_provider import DeviceCapability, DeviceMonitoringCredential
-from app.schemas.device import DeviceCreate, DeviceRead, DeviceUpdate, DeviceStatusRead
+from app.schemas.device import (
+    DeviceCreate, DeviceRead, DeviceUpdate, DeviceStatusRead,
+    DeviceRedundantCreate, DeviceRedundantRead,
+)
 from app.schemas.monitoring_provider import (LinuxConnectionInput, LinuxConnectionRead, WindowsCapabilityRead,
     SNMPCapabilityRead, SNMPConnectionInput, SNMPConnectionRead, WindowsConnectionInput, WindowsConnectionRead)
 from app.security import decrypt_secret, encrypt_secret
@@ -164,6 +168,193 @@ async def create_device(device_in: DeviceCreate, db: AsyncSession = Depends(get_
     await db.commit()
     await db.refresh(device)
     return device
+
+
+def _redundant_link_name(source: Device, destination: Device, priority: LinkPriority) -> str:
+    suffix = f" [{source.id}-{destination.id}]"
+    base = f"{priority.value}: {source.name.strip()} -> {destination.name.strip()}"
+    return f"{base[:128 - len(suffix)]}{suffix}"
+
+
+@router.post(
+    "/with-redundant-links",
+    response_model=DeviceRedundantRead,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_operator)],
+)
+async def create_device_with_redundant_links(
+    payload: DeviceRedundantCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a device and both upstream links as one database transaction."""
+    existing = await db.execute(select(Device).where(Device.name == payload.device.name))
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Device with this name already exists")
+
+    group = await db.get(RedundancyGroup, payload.redundancy_group_id)
+    if not group:
+        raise HTTPException(status_code=400, detail="Redundancy group not found")
+    if group.redundancy_type != RedundancyType.DEVICE:
+        raise HTTPException(status_code=400, detail="Select a device redundancy group")
+    if group.primary_device_id is None or group.secondary_device_id is None:
+        raise HTTPException(status_code=400, detail="Redundancy group must have primary and secondary devices")
+    if group.primary_device_id == group.secondary_device_id:
+        raise HTTPException(status_code=400, detail="Redundancy group members must be different")
+
+    primary_source = await db.get(Device, group.primary_device_id)
+    secondary_source = await db.get(Device, group.secondary_device_id)
+    if not primary_source or not secondary_source:
+        raise HTTPException(status_code=400, detail="One or more redundancy group devices no longer exist")
+
+    device_data = payload.device.model_dump()
+    # The primary redundancy member is also the device's upstream dependency.
+    device_data["gateway_device_id"] = primary_source.id
+    if not device_data.get("gateway_ip_address"):
+        device_data["gateway_ip_address"] = primary_source.ip_address
+    device_data["primary_link_id"] = None
+    device = Device(**device_data)
+
+    if device.ip_address:
+        ping_res = await ping_target(device.ip_address, count=2)
+        device.status = DeviceStatus.ONLINE if ping_res["is_up"] else DeviceStatus.OFFLINE
+
+    db.add(device)
+    await db.flush()
+
+    common = {
+        "destination_device_id": device.id,
+        "link_type": payload.link_type,
+        "is_critical": payload.links_are_critical,
+        "monitoring_interval": payload.link_monitoring_interval,
+    }
+    primary_link = Link(
+        name=_redundant_link_name(primary_source, device, LinkPriority.PRIMARY),
+        description=f"Primary path through redundancy group {group.name}",
+        source_device_id=primary_source.id,
+        priority=LinkPriority.PRIMARY,
+        **common,
+    )
+    secondary_link = Link(
+        name=_redundant_link_name(secondary_source, device, LinkPriority.SECONDARY),
+        description=f"Secondary path through redundancy group {group.name}",
+        source_device_id=secondary_source.id,
+        priority=LinkPriority.SECONDARY,
+        **common,
+    )
+    db.add_all([primary_link, secondary_link])
+    await db.flush()
+    device.primary_link_id = primary_link.id
+    await db.commit()
+    await db.refresh(device)
+    await db.refresh(primary_link)
+    await db.refresh(secondary_link)
+    return DeviceRedundantRead(
+        device=DeviceRead.model_validate(device),
+        primary_link=primary_link,
+        secondary_link=secondary_link,
+    )
+
+
+@router.put(
+    "/with-redundant-links/{device_id}",
+    response_model=DeviceRedundantRead,
+    dependencies=[Depends(require_operator)],
+)
+async def update_device_with_redundant_links(
+    device_id: int,
+    payload: DeviceRedundantCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    """Update a device and reconcile its primary/secondary paths atomically."""
+    device = await db.get(Device, device_id)
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    duplicate = await db.execute(select(Device).where(Device.name == payload.device.name, Device.id != device_id))
+    if duplicate.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Device with this name already exists")
+
+    group = await db.get(RedundancyGroup, payload.redundancy_group_id)
+    if not group or group.redundancy_type != RedundancyType.DEVICE:
+        raise HTTPException(status_code=400, detail="Select a valid device redundancy group")
+    if not group.primary_device_id or not group.secondary_device_id or group.primary_device_id == group.secondary_device_id:
+        raise HTTPException(status_code=400, detail="Redundancy group must have two different devices")
+    primary_source = await db.get(Device, group.primary_device_id)
+    secondary_source = await db.get(Device, group.secondary_device_id)
+    if not primary_source or not secondary_source:
+        raise HTTPException(status_code=400, detail="One or more redundancy group devices no longer exist")
+    if device_id in {primary_source.id, secondary_source.id}:
+        raise HTTPException(status_code=400, detail="Device cannot be its own redundancy source")
+
+    primary_link = await db.get(Link, device.primary_link_id) if device.primary_link_id else None
+    if primary_link and device_id not in {primary_link.source_device_id, primary_link.destination_device_id}:
+        primary_link = None
+    if not primary_link:
+        primary_links = (await db.execute(select(Link).where(
+            Link.destination_device_id == device_id,
+            Link.priority == LinkPriority.PRIMARY,
+        ).order_by(Link.id))).scalars().all()
+        if len(primary_links) > 1:
+            raise HTTPException(status_code=409, detail="Device has multiple primary links; resolve them on the Links page first")
+        primary_link = primary_links[0] if primary_links else None
+    secondary_links = (await db.execute(select(Link).where(
+        Link.destination_device_id == device_id,
+        Link.priority == LinkPriority.SECONDARY,
+    ).order_by(Link.id))).scalars().all()
+    if len(secondary_links) > 1:
+        raise HTTPException(status_code=409, detail="Device has multiple secondary links; resolve them on the Links page first")
+    secondary_link = secondary_links[0] if secondary_links else None
+
+    device_data = payload.device.model_dump(exclude={"primary_link_id", "gateway_device_id", "gateway_ip_address"})
+    for field, value in device_data.items():
+        setattr(device, field, value)
+    device.gateway_device_id = primary_source.id
+    device.gateway_ip_address = primary_source.ip_address
+
+    common = {
+        "destination_device_id": device.id,
+        "link_type": payload.link_type,
+        "is_critical": payload.links_are_critical,
+        "monitoring_interval": payload.link_monitoring_interval,
+    }
+    if not primary_link:
+        primary_link = Link(source_device_id=primary_source.id, priority=LinkPriority.PRIMARY, **common)
+        db.add(primary_link)
+    primary_link.source_device_id = primary_source.id
+    primary_link.destination_device_id = device.id
+    primary_link.source_interface_id = None
+    primary_link.destination_interface_id = None
+    primary_link.priority = LinkPriority.PRIMARY
+    primary_link.link_type = payload.link_type
+    primary_link.is_critical = payload.links_are_critical
+    primary_link.monitoring_interval = payload.link_monitoring_interval
+    primary_link.name = _redundant_link_name(primary_source, device, LinkPriority.PRIMARY)
+    primary_link.description = f"Primary path through redundancy group {group.name}"
+
+    if not secondary_link:
+        secondary_link = Link(source_device_id=secondary_source.id, priority=LinkPriority.SECONDARY, **common)
+        db.add(secondary_link)
+    secondary_link.source_device_id = secondary_source.id
+    secondary_link.destination_device_id = device.id
+    secondary_link.source_interface_id = None
+    secondary_link.destination_interface_id = None
+    secondary_link.priority = LinkPriority.SECONDARY
+    secondary_link.link_type = payload.link_type
+    secondary_link.is_critical = payload.links_are_critical
+    secondary_link.monitoring_interval = payload.link_monitoring_interval
+    secondary_link.name = _redundant_link_name(secondary_source, device, LinkPriority.SECONDARY)
+    secondary_link.description = f"Secondary path through redundancy group {group.name}"
+
+    await db.flush()
+    device.primary_link_id = primary_link.id
+    await db.commit()
+    await db.refresh(device)
+    await db.refresh(primary_link)
+    await db.refresh(secondary_link)
+    return DeviceRedundantRead(
+        device=DeviceRead.model_validate(device),
+        primary_link=primary_link,
+        secondary_link=secondary_link,
+    )
 
 
 @router.get("/{device_id}", response_model=DeviceRead)
