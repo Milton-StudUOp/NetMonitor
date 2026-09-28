@@ -19,6 +19,7 @@ export default function Devices({ user }) {
   const [icons, setIcons] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState('ALL');
+  const [statusFilter, setStatusFilter] = useState('ALL');
   const [page, setPage] = useState(1);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -241,7 +242,8 @@ export default function Devices({ user }) {
       (d.gateway_ip_address && d.gateway_ip_address.includes(searchTerm)) ||
       (d.location && d.location.toLowerCase().includes(searchTerm.toLowerCase()));
     const matchesType = typeFilter === 'ALL' || d.device_type === typeFilter;
-    return matchesSearch && matchesType;
+    const matchesStatus = statusFilter === 'ALL' || d.status === statusFilter;
+    return matchesSearch && matchesType && matchesStatus;
   });
   const visibleDevices = filteredDevices.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const deviceRedundancyGroups = redundancyGroups.filter((group) => group.redundancy_type === 'DEVICE' && group.primary_device && group.secondary_device);
@@ -301,6 +303,19 @@ export default function Devices({ user }) {
             <option value="FIREWALL">Firewall</option>
             <option value="SERVER">Servidor</option>
             <option value="OTHER">Outro</option>
+          </select>
+          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginLeft: '4px' }}>Status:</span>
+          <select
+            className="form-select"
+            style={{ padding: '6px 12px', fontSize: '0.85rem' }}
+            value={statusFilter}
+            onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+          >
+            <option value="ALL">All Statuses</option>
+            <option value="ONLINE">Online</option>
+            <option value="OFFLINE">Offline</option>
+            <option value="DEGRADED">Degraded</option>
+            <option value="UNKNOWN">Unknown</option>
           </select>
         </div>
       </div>
