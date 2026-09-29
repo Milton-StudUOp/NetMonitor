@@ -123,9 +123,9 @@ class NotificationIntegrationInput(BaseModel):
         if unknown_config or unknown_secrets:
             raise ValueError("Configuration contains unsupported fields for this provider")
         if self.provider == "WHATSAPP":
-            mode = str(self.config.get("mode") or ("HTTP_API" if self.config.get("api_url") else "WEBJS")).upper()
-            if mode not in {"WEBJS", "HTTP_API"}:
-                raise ValueError("WhatsApp mode must be WEBJS or HTTP_API")
+            mode = str(self.config.get("mode") or "HTTP_API").upper()
+            if mode != "HTTP_API":
+                raise ValueError("WhatsApp supports HTTP_API only. Configure an API URL and access token.")
             self.config["mode"] = mode
         return self
 

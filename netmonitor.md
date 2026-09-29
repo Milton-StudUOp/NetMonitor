@@ -157,7 +157,7 @@ Settings → Notifications supports independent configuration, save, test, and e
 
 - **SMTP email**: SMTP server, port, account, encrypted password, sender, recipients, STARTTLS, or implicit TLS.
 - **Telegram**: encrypted bot token and one or more chat IDs, including groups and channels.
-- **WhatsApp**: persisted WhatsApp Web linked-device session using a QR code, or an official/provider HTTP API with encrypted token and recipients.
+- **WhatsApp**: Meta Cloud API or a compatible HTTP API with encrypted access token, multiple recipients, and outage/recovery notifications. No QR code or browser service is required.
 
 Stored passwords, tokens, and secrets are never returned by the API. The UI indicates that a secret exists without revealing it. Every channel stores its last test result and error details for operational diagnosis.
 

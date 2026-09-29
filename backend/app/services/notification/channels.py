@@ -15,15 +15,21 @@ from app.config import get_settings
 from app.models.platform import NotificationIntegration
 from app.security import decrypt_secret, encrypt_secret
 from app.services.tls import verified_tls_context
-from app.services.whatsapp_web import (
-    WhatsAppWebConfigurationError,
-    whatsapp_web_connection,
-    whatsapp_web_send,
-)
 
 
 class NotificationConfigurationError(ValueError):
     """Raised when an integration is incomplete or internally inconsistent."""
+
+
+def is_meta_whatsapp_api(url: str) -> bool:
+    return urlparse(url).hostname == "graph.facebook.com"
+
+
+def whatsapp_api_payload(config: dict, target: str, text: str) -> dict:
+    if is_meta_whatsapp_api(config.get("api_url", "")):
+        return {"messaging_product": "whatsapp", "recipient_type": "individual",
+                "to": target, "type": "text", "text": {"preview_url": False, "body": text[:4096]}}
+    return {"sender": config.get("sender_id"), "recipient": target, "message": text}
 
 
 def environment_email_integration() -> NotificationIntegration | None:
@@ -78,20 +84,20 @@ def validate_integration(provider: str, config: dict, secrets: dict) -> None:
     elif provider == "WHATSAPP":
         recipients = config.get("recipients") or ([config.get("recipient")] if config.get("recipient") else [])
         required = {"at least one recipient": recipients}
-        if config.get("mode", "HTTP_API") == "WEBJS":
-            if any(not re.fullmatch(r"\d{8,15}", str(target).strip()) for target in recipients):
-                raise NotificationConfigurationError(
-                    "WhatsApp Web recipients must contain 8 to 15 digits, including the country code."
-                )
-            try:
-                whatsapp_web_connection()
-            except WhatsAppWebConfigurationError as exc:
-                raise NotificationConfigurationError(str(exc)) from exc
+        if config.get("mode", "HTTP_API") != "HTTP_API":
+            raise NotificationConfigurationError("QR-based WhatsApp has been removed. Configure the HTTP API in Settings.")
         else:
             required.update({"API URL": config.get("api_url"), "API token": secrets.get("api_token")})
             url = config.get("api_url")
             if url and urlparse(url).scheme not in {"http", "https"}:
                 raise NotificationConfigurationError("WhatsApp API URL must use HTTP or HTTPS.")
+            if url and is_meta_whatsapp_api(url):
+                parsed = urlparse(url)
+                if parsed.scheme != "https" or not re.fullmatch(r"/v\d+\.\d+/\d+/messages", parsed.path) or parsed.query or parsed.fragment or parsed.username:
+                    raise NotificationConfigurationError(
+                        "Meta API URL must be https://graph.facebook.com/v<VERSION>/<PHONE_NUMBER_ID>/messages, without query parameters. Use the phone number ID, not the business account ID.")
+                if any(not re.fullmatch(r"[1-9]\d{7,14}", str(target)) for target in recipients):
+                    raise NotificationConfigurationError("Meta recipients must contain 8 to 15 digits including country code, without + or spaces.")
     else:
         raise NotificationConfigurationError(f"Unsupported notification provider: {provider}.")
 
@@ -266,16 +272,12 @@ async def send_notification(
     if item.provider == "WHATSAPP":
         text = content["whatsapp"]
         targets = recipient_targets("WHATSAPP", config, additional_recipients)
-        if config.get("mode", "HTTP_API") == "WEBJS":
-            for target in targets:
-                await whatsapp_web_send(target, text)
-            return
         async with httpx.AsyncClient(timeout=10) as client:
             for target in targets:
                 response = await client.post(
                     config["api_url"],
                     headers={"Authorization": f"Bearer {secrets['api_token']}"},
-                    json={"sender": config.get("sender_id"), "recipient": target, "message": text},
+                    json=whatsapp_api_payload(config, target, text),
                 )
                 response.raise_for_status()
         return
@@ -312,9 +314,27 @@ async def send_notification(
 def safe_delivery_error(exc: Exception) -> str:
     if isinstance(exc, NotificationConfigurationError):
         return str(exc)
-    if isinstance(exc, WhatsAppWebConfigurationError):
-        return str(exc)
     if isinstance(exc, httpx.HTTPStatusError):
+        if is_meta_whatsapp_api(str(exc.request.url)):
+            try:
+                error = exc.response.json().get("error", {})
+                code = error.get("code") if isinstance(error, dict) else None
+            except (ValueError, AttributeError):
+                code = None
+            hints = {
+                190: "Access token is invalid or expired. Renew the token in Meta.",
+                100: "Invalid request or phone number ID. Verify the messages URL and recipient.",
+                10: "Token lacks the required WhatsApp messaging permission.",
+                200: "Token does not have permission for this WhatsApp account.",
+                131030: "Recipient is not on the allowed list for the Meta test number.",
+                131047: "The 24-hour messaging window is closed. The recipient must message this business first, or use an approved template.",
+                131026: "Message could not be delivered. Verify the recipient's WhatsApp account.",
+            }
+            hint = hints.get(code, "Verify the phone number ID, token permissions, recipient and messaging window.") if isinstance(code, int) else "Verify the phone number ID, token permissions and recipient."
+            label = f" (code {code})" if isinstance(code, int) else ""
+            if code == 100 and isinstance(error, dict) and "unsupported request - method type" in str(error.get("message", "")).lower():
+                hint = "Meta rejected POST on this endpoint. Verify the API version and that the URL uses the sending Phone Number ID followed by /messages. Compare the exact URL with your successful Graph Explorer request."
+            return f"Meta WhatsApp HTTP {exc.response.status_code}{label}: {hint}"
         return f"Provider returned HTTP {exc.response.status_code}. Verify credentials and recipient settings."
     if isinstance(exc, (httpx.TimeoutException, TimeoutError)):
         return "Connection timed out. Verify the provider address and outbound network access."

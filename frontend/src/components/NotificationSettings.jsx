@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Bell, CheckCircle2, Edit3, Link2, LogOut, Plus, RefreshCw, Save, Send, Trash2, X } from 'lucide-react';
+import { Bell, CheckCircle2, Edit3, Plus, Save, Send, Trash2, X } from 'lucide-react';
 import api from '../api/client';
 import { getApiErrorMessage } from '../utils/errors';
 
 const defaults = {
   EMAIL: { provider: 'EMAIL', name: 'SMTP Email', enabled: false, config: { smtp_server: '', smtp_port: 587, username: '', from_address: '', recipients: [], tls: true, ssl: false }, secrets: { password: '' }, secrets_configured: [], last_status: 'UNTESTED' },
   TELEGRAM: { provider: 'TELEGRAM', name: 'Telegram', enabled: false, config: { chat_ids: [] }, secrets: { bot_token: '' }, secrets_configured: [], last_status: 'UNTESTED' },
-  WHATSAPP: { provider: 'WHATSAPP', name: 'WhatsApp', enabled: false, config: { mode: 'WEBJS', api_url: '', sender_id: '', recipients: [] }, secrets: { api_token: '' }, secrets_configured: [], last_status: 'UNTESTED' },
+  WHATSAPP: { provider: 'WHATSAPP', name: 'WhatsApp', enabled: false, config: { mode: 'HTTP_API', api_url: '', sender_id: '', recipients: [] }, secrets: { api_token: '' }, secrets_configured: [], last_status: 'UNTESTED' },
 };
 
 const blankRule = { name: '', event_type: 'DEVICE_DOWN', severity: 'CRITICAL', source: '', channels: ['EMAIL'], recipients: '', reminder_minutes: 0, notify_recovery: true, enabled: true };
@@ -37,7 +37,6 @@ export default function NotificationSettings({ report }) {
   const [editingRuleId, setEditingRuleId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState('');
-  const [whatsappSession, setWhatsappSession] = useState(null);
   const [recipientInputs, setRecipientInputs] = useState(blankRecipientInputs);
 
   const load = async () => {
@@ -50,7 +49,7 @@ export default function NotificationSettings({ report }) {
       providerResponse.data.forEach(item => {
         if (!merged[item.provider]) return;
         const loadedConfig = { ...(item.config || {}) };
-        if (item.provider === 'WHATSAPP' && !loadedConfig.mode) loadedConfig.mode = loadedConfig.api_url ? 'HTTP_API' : 'WEBJS';
+        if (item.provider === 'WHATSAPP') loadedConfig.mode = 'HTTP_API';
         merged[item.provider] = { ...merged[item.provider], ...item, config: { ...merged[item.provider].config, ...loadedConfig }, secrets: { ...merged[item.provider].secrets } };
       });
       setProviders(merged);
@@ -69,23 +68,6 @@ export default function NotificationSettings({ report }) {
 
   useEffect(() => { load(); }, []);
 
-  const loadWhatsappSession = async (quiet = false) => {
-    try {
-      const response = await api.get('/platform/notifications/WHATSAPP/session');
-      setWhatsappSession(response.data);
-    } catch (error) {
-      setWhatsappSession({ status: 'UNAVAILABLE', last_error: getApiErrorMessage(error) });
-      if (!quiet) report('error', getApiErrorMessage(error));
-    }
-  };
-
-  useEffect(() => {
-    if (providers.WHATSAPP.config.mode !== 'WEBJS') return undefined;
-    loadWhatsappSession(true);
-    const timer = window.setInterval(() => loadWhatsappSession(true), 3000);
-    return () => window.clearInterval(timer);
-  }, [providers.WHATSAPP.config.mode]);
-
   const updateProvider = (provider, section, field, value) => setProviders(current => ({
     ...current,
     [provider]: { ...current[provider], [section]: { ...current[provider][section], [field]: value } },
@@ -94,33 +76,6 @@ export default function NotificationSettings({ report }) {
   const toggleProvider = (provider, enabled) => setProviders(current => ({
     ...current, [provider]: { ...current[provider], enabled },
   }));
-
-  const startWhatsapp = async () => {
-    setBusy('whatsapp-connect');
-    try {
-      const response = await api.post('/platform/notifications/WHATSAPP/session/start');
-      setWhatsappSession(response.data);
-      report('success', 'WhatsApp connection started. Scan the QR code when it appears.');
-    } catch (error) {
-      report('error', getApiErrorMessage(error));
-    } finally {
-      setBusy('');
-    }
-  };
-
-  const logoutWhatsapp = async () => {
-    if (!window.confirm('Disconnect this WhatsApp account and remove its saved web session?')) return;
-    setBusy('whatsapp-logout');
-    try {
-      const response = await api.delete('/platform/notifications/WHATSAPP/session');
-      setWhatsappSession(response.data);
-      report('success', 'WhatsApp account disconnected.');
-    } catch (error) {
-      report('error', getApiErrorMessage(error));
-    } finally {
-      setBusy('');
-    }
-  };
 
   const saveProvider = async (provider, testAfter = false) => {
     const integration = providers[provider];
@@ -233,14 +188,8 @@ export default function NotificationSettings({ report }) {
         </>}
         {key === 'TELEGRAM' && <><SecretField label="Bot token" configured={provider.secrets_configured?.includes('bot_token')} hint="Create a bot with BotFather." value={provider.secrets.bot_token} onChange={event => updateProvider(key, 'secrets', 'bot_token', event.target.value.trim())}/><Field label="Chat IDs" required hint="Separate Chat IDs with commas, semicolons, or line breaks. Groups and channels may use negative IDs."><input className="form-input" placeholder="123456789, -1001234567890" value={recipientInputs.TELEGRAM} onChange={event => setRecipientInputs(current => ({ ...current, TELEGRAM: event.target.value }))}/></Field></>}
         {key === 'WHATSAPP' && <>
-          <Field label="Integration mode" required><select className="form-select" value={provider.config.mode || 'HTTP_API'} onChange={event => updateProvider(key, 'config', 'mode', event.target.value)}><option value="WEBJS">Linked WhatsApp Web (QR code)</option><option value="HTTP_API">Official/provider HTTP API</option></select></Field>
-          {provider.config.mode === 'WEBJS' ? <div className="whatsapp-session">
-            <div className="whatsapp-session-heading"><div><strong>Linked device session</strong><span className={`badge badge-${whatsappSession?.status === 'READY' ? 'online' : whatsappSession?.status === 'QR_REQUIRED' || whatsappSession?.status === 'INITIALIZING' ? 'warning' : 'unknown'}`}>{whatsappSession?.status || 'CHECKING'}</span></div><button type="button" className="btn btn-secondary" disabled={Boolean(busy)} onClick={() => loadWhatsappSession()}><RefreshCw size={14}/> Refresh</button></div>
-            {whatsappSession?.status === 'READY' && <p className="whatsapp-ready"><CheckCircle2 size={16}/> Connected{whatsappSession.connected_account ? ` as +${whatsappSession.connected_account}` : ''}. The saved session will be reused after restart.</p>}
-            {whatsappSession?.qr_data_url && <div className="whatsapp-qr"><img src={whatsappSession.qr_data_url} alt="WhatsApp device-linking QR code"/><p>Open WhatsApp → Linked devices → Link a device, then scan this code. QR codes expire and refresh automatically.</p></div>}
-            {whatsappSession?.last_error && <p className="field-error">{whatsappSession.last_error}</p>}
-            <div className="row-actions"><button type="button" className="btn btn-primary" disabled={Boolean(busy) || ['READY', 'INITIALIZING', 'QR_REQUIRED', 'AUTHENTICATED'].includes(whatsappSession?.status)} onClick={startWhatsapp}><Link2 size={14}/> {busy === 'whatsapp-connect' ? 'Starting…' : 'Connect WhatsApp'}</button><button type="button" className="btn btn-danger" disabled={Boolean(busy) || !whatsappSession || whatsappSession.status === 'STOPPED'} onClick={logoutWhatsapp}><LogOut size={14}/> Disconnect</button></div>
-          </div> : <><Field label="Provider API URL" required><input className="form-input" type="url" placeholder="https://provider.example/messages" value={provider.config.api_url} onChange={event => updateProvider(key, 'config', 'api_url', event.target.value.trim())}/></Field><SecretField label="API token" configured={provider.secrets_configured?.includes('api_token')} value={provider.secrets.api_token} onChange={event => updateProvider(key, 'secrets', 'api_token', event.target.value.trim())}/><Field label="Sender ID"><input className="form-input" value={provider.config.sender_id} onChange={event => updateProvider(key, 'config', 'sender_id', event.target.value.trim())}/></Field></>}
+          <><Field label="Provider API URL" required><input className="form-input" type="url" placeholder="https://provider.example/messages" value={provider.config.api_url} onChange={event => updateProvider(key, 'config', 'api_url', event.target.value.trim())}/></Field><SecretField label="API token" configured={provider.secrets_configured?.includes('api_token')} value={provider.secrets.api_token} onChange={event => updateProvider(key, 'secrets', 'api_token', event.target.value.trim())}/><Field label="Sender ID"><input className="form-input" value={provider.config.sender_id} onChange={event => updateProvider(key, 'config', 'sender_id', event.target.value.trim())}/></Field></>
+          <p className="field-hint">For Meta Cloud API, use https://graph.facebook.com/v&lt;VERSION&gt;/&lt;PHONE_NUMBER_ID&gt;/messages. Sender ID is not required; the URL identifies the sender. Text messages require an open 24-hour customer service window. Outside that window, Meta requires an approved template; this integration currently sends text only. For Meta test numbers, add recipients to the allowed list.</p>
           <Field label="Recipients" required hint="Separate numbers with commas, semicolons, or line breaks; digits only, including country code."><input className="form-input" placeholder="258841234567, 258851234567" value={recipientInputs.WHATSAPP} onChange={event => setRecipientInputs(current => ({ ...current, WHATSAPP: event.target.value }))}/></Field>
         </>}
         <div className="row-actions notification-actions"><button type="button" className="btn btn-primary" disabled={Boolean(busy)} onClick={() => saveProvider(key)}><Save size={14}/> {busy === `save-${key}` ? 'Saving…' : 'Save'}</button><button type="button" className="btn btn-secondary" disabled={Boolean(busy)} onClick={() => saveProvider(key, true)}><Send size={14}/> {busy === `test-${key}` ? 'Testing…' : 'Save & Test'}</button></div>

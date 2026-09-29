@@ -92,7 +92,7 @@ Rule severity is a minimum threshold: `INFORMATION` matches all severities, `WAR
 
 Notification integrations normally live in the active primary database. When EMAIL has not yet been persisted, the API exposes a password-masked SMTP view derived from `.env`; invitation and recovery delivery use the same fallback. TLS contexts use the packaged CA bundle so a Python installation under a custom prefix does not silently lose certificate verification.
 
-The optional WhatsApp Web integration is process-isolated. The active primary database stores only the provider mode and recipient list. FastAPI proxies authenticated administrative session commands and message delivery to a private Node.js bridge using a deployment secret. `LocalAuth` browser/session data is deliberately kept outside every application database in a restricted persistent volume; switching SQLite, PostgreSQL, MySQL, SQL Server, or Oracle therefore does not move or invalidate the linked-device session. QR payloads remain in bridge memory, are returned only through administrator-protected endpoints, carry `Cache-Control: no-store`, and are never logged or persisted in the application database.
+WhatsApp uses HTTPS requests from the backend to Meta Cloud API or a compatible provider. Credentials are encrypted in the active primary database. No browser, linked-device session, QR endpoint, or separate Node service is required. The existing portable persistence layer supports all configured database engines.
 
 ## Services and metrics providers
 
@@ -100,7 +100,7 @@ Remote service and system monitoring is separate from network reachability. The 
 
 The next provider will add Linux over SSH behind the same conceptual contract: connection test, capability discovery, service discovery, batched service checks, and system metric collection. Provider-specific credentials and transports remain isolated. Shared persistence uses provider and platform fields so Windows and Linux can coexist without parallel monitoring engines. See the detailed [Linux implementation roadmap](../improvement.md).
 
-The bridge exposes explicit `INITIALIZING`, `QR_REQUIRED`, `AUTHENTICATED`, `READY`, `FAILED`, and `DISCONNECTED` states. It detects common system browsers, falls back to Puppeteer's managed Chrome, reports permission/path failures, and stops silent initialization after 60 seconds. WhatsApp delivery uses a dedicated compact formatter; it does not reuse the longer plain-text email/Telegram representation.
+WhatsApp delivery uses a compact channel-specific formatter. Meta endpoints receive the Cloud API text-message contract, while compatible custom providers receive the generic HTTP contract.
 
 Notification destination fields use a common multi-value input contract: commas, semicolons, and line breaks are accepted in the frontend, then values are trimmed, deduplicated, and serialized as arrays at save time. The backend remains authoritative for provider-specific validation and sends one delivery per normalized destination.
 

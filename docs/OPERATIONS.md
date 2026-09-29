@@ -182,9 +182,9 @@ Production defaults suppress SQL statement logging, SQL parameters, per-device p
 
 For SMTP on Python compiled under `/opt` or another custom prefix, NetMonitor uses the `certifi` CA bundle explicitly. Never work around certificate errors with an unverified TLS context. Port 587 conventionally uses STARTTLS; port 465 uses implicit TLS.
 
-For a local WhatsApp Web bridge, run `npm run start:local` as a supervised service or `npm run start:qr` during initial linking. The bridge binds to `127.0.0.1:3010`, loads its token from the project `.env`, and must remain running for delivery. Confirm status `READY` in **Settings → Notifications → WhatsApp** after restarting the host. Back up the restricted session directory separately only if the deployment's security policy permits linked-device session backups.
+WhatsApp uses the HTTP API configured in Settings → Notifications. No separate bridge process is needed. Existing installations should stop their old bridge service and revoke the linked device from the phone. See [WhatsApp API](WHATSAPP_API.md) for upgrade instructions.
 
-When testing a channel with multiple recipients, separate destinations with commas, semicolons, or line breaks, save the integration, and verify delivery to every destination. WhatsApp Web numbers use country code plus subscriber number as 8–15 digits only. A successful test to one destination does not prove that the remaining addresses, Chat IDs, or numbers are valid.
+When testing a channel with multiple recipients, separate destinations with commas, semicolons, or line breaks, save the integration, and verify delivery to every destination. WhatsApp numbers use country code plus subscriber number as 8–15 digits only. A successful test to one destination does not prove that the remaining addresses, Chat IDs, or numbers are valid.
 
 ## Persistent state
 
