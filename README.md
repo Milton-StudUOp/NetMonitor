@@ -275,7 +275,7 @@ When no EMAIL integration exists in the active database, the Settings screen loa
 
 WhatsApp is API-only; QR linking and the browser bridge have been removed. See [WhatsApp API integration](docs/WHATSAPP_API.md) for setup, migration, messaging-window limitations, and troubleshooting.
 
-WhatsApp messages use a channel-specific compact layout: status/severity, short incident title, target, UTC timestamp, incident reference, concise description, and probable cause. Recovery messages omit the cause and use a shorter `RECOVERED` heading. Email and Telegram retain their own presentation formats.
+WhatsApp messages use a channel-specific compact layout: status/severity, short incident title, target, local timestamp with UTC offset, incident reference, concise description, and probable cause. Recovery messages omit the cause and use a shorter `RECOVERED` heading. Email and Telegram retain their own presentation formats. All three channels use the backend host timezone by default; set `NOTIFICATION_TIMEZONE` to an IANA name such as `Africa/Maputo` or `Africa/Blantyre` for an explicit timezone, especially in containers. Database timestamps remain UTC. Restart the backend after changing this setting.
 
 ## Tests
 

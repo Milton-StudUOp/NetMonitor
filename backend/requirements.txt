@@ -63,6 +63,7 @@ starlette
 structlog
 typing_extensions
 urllib3
+tzdata
 uvicorn
 watchfiles
 websockets

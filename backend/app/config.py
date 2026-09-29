@@ -2,6 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 import socket
 from typing import Any, List
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -23,6 +24,20 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:///./network_monitor.db"
 
     # Redis
+    # Empty uses the backend host timezone; an IANA name also works in containers.
+    NOTIFICATION_TIMEZONE: str = ""
+
+    @field_validator("NOTIFICATION_TIMEZONE")
+    @classmethod
+    def valid_notification_timezone(cls, value: str) -> str:
+        value = value.strip()
+        if value:
+            try:
+                ZoneInfo(value)
+            except (ZoneInfoNotFoundError, ValueError) as exc:
+                raise ValueError("NOTIFICATION_TIMEZONE must be a valid IANA timezone") from exc
+        return value
+
     REDIS_URL: str = "redis://localhost:6379/0"
 
     # SNMP

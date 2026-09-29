@@ -17,6 +17,10 @@ In **Settings → Notifications → WhatsApp**, enable the integration and enter
    recipients with commas, semicolons, or line breaks.
 
 Sender ID is unnecessary for Meta: the URL identifies the sending number.
+Notification times use the backend host timezone and display the UTC offset.
+Set `NOTIFICATION_TIMEZONE=Africa/Maputo` (or another IANA timezone) in the
+deployment environment to override it. Restart the backend after changing the
+setting. Stored incident and recovery timestamps remain UTC.
 Use **Save & Test**, then verify receipt on the phone. API acceptance alone is
 not proof of delivery. Enable the relevant notification rule and its recovery
 option to receive both outage and recovery messages.

@@ -4,6 +4,7 @@ import re
 import smtplib
 import ssl
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from email.message import EmailMessage
 from email.utils import formatdate, make_msgid, parseaddr
 from html import escape
@@ -123,12 +124,15 @@ def _whatsapp_value(value, limit: int = 500) -> str:
     return normalized[:limit]
 
 
-def _whatsapp_time(value) -> str:
+def notification_time(value) -> str:
     try:
         parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
-        return parsed.astimezone(timezone.utc).strftime("%d %b %Y · %H:%M UTC")
+        zone = get_settings().NOTIFICATION_TIMEZONE
+        local = parsed.astimezone(ZoneInfo(zone)) if zone else parsed.astimezone()
+        offset = local.strftime("%z")
+        return local.strftime("%d %b %Y · %H:%M") + f" (UTC{offset[:3]}:{offset[3:]})"
     except (TypeError, ValueError):
         return _whatsapp_value(value, 60)
 
@@ -152,7 +156,7 @@ def build_whatsapp_content(
     if context.get("target"):
         lines.append(f"Target: {_whatsapp_value(context['target'], 180)}")
     occurred_at = context.get("occurred_at") or datetime.now(timezone.utc).isoformat()
-    lines.extend([f"Time: {_whatsapp_time(occurred_at)}", f"Incident: {incident}"])
+    lines.extend([f"Time: {notification_time(occurred_at)}", f"Incident: {incident}"])
     concise_message = _whatsapp_value(message)
     if concise_message and concise_message.lower() != _whatsapp_value(title).lower():
         lines.extend(["", concise_message])
@@ -196,7 +200,7 @@ def build_notification_content(
         f"Severity: {presentation['label']}",
         f"Event: {event}",
         f"Target: {target}",
-        f"Time (UTC): {occurred_at}",
+        f"Time: {notification_time(occurred_at)}",
         "",
         title,
         message,
@@ -226,7 +230,7 @@ def build_notification_content(
         <tr><td style="padding:7px 0;color:#64748b">Severity</td><td style="padding:7px 0;font-weight:700;color:{presentation['color']}">{presentation['label']}</td></tr>
         <tr><td style="padding:7px 0;color:#64748b">Event</td><td style="padding:7px 0">{escape(event)}</td></tr>
         <tr><td style="padding:7px 0;color:#64748b">Target</td><td style="padding:7px 0">{escape(str(target))}</td></tr>
-        <tr><td style="padding:7px 0;color:#64748b">Time (UTC)</td><td style="padding:7px 0">{escape(str(occurred_at))}</td></tr>
+        <tr><td style="padding:7px 0;color:#64748b">Time</td><td style="padding:7px 0">{escape(notification_time(occurred_at))}</td></tr>
       </table>
       <div style="margin-top:20px;padding:16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;line-height:1.6">{escape(message)}</div>
       {cause_html}
