@@ -72,6 +72,7 @@ app.add_middleware(
 
 PUBLIC_PATHS = {"/health", "/api/auth/login", "/api/auth/bootstrap", "/api/auth/forgot-password", "/api/auth/reset-password"}
 SELF_SERVICE_PATHS = {"/api/auth/me", "/api/auth/logout", "/api/auth/change-password"}
+AUTH_SESSION_MUTATION_PATHS = {"/api/auth/logout", "/api/auth/change-password"}
 OPERATOR_MUTATIONS = (
     ("PUT", "/api/alerts/"),
     ("POST", "/api/discovery/"),
@@ -104,15 +105,12 @@ async def _authenticate_request(request: Request, call_next):
         if not authenticated:
             return JSONResponse(status_code=401, content={"detail":"Session is invalid or expired"})
         user, session = authenticated
-        # End the authentication transaction BEFORE the endpoint obtains its
-        # own connection. Otherwise concurrent requests can occupy the entire
-        # pool while each waits for a second connection. expire_on_commit=False
-        # keeps the loaded identity available without issuing another query.
+        # Finish authentication before dispatching normal endpoints. A commit
+        # ends the transaction but does not necessarily return the connection
+        # to the pool while this context is open.
         await db.commit()
         request.state.user = user
         request.state.auth_session = session
-        # Account mutations reuse this session and start a new transaction.
-        request.state.auth_db = db
         if database.migration_in_progress and request.method not in {"GET", "HEAD", "OPTIONS"}:
             return JSONResponse(status_code=503, content={"detail":"Database migration is in progress; changes are temporarily disabled"})
         if user.must_change_password and request.url.path not in SELF_SERVICE_PATHS:
@@ -125,23 +123,39 @@ async def _authenticate_request(request: Request, call_next):
                 return JSONResponse(status_code=403, content={"detail":"Viewer role is read-only"})
         if request.method not in {"GET", "HEAD", "OPTIONS"} and user.role == "OPERATOR" and request.url.path not in SELF_SERVICE_PATHS and not personal_topology_view and not any(request.method == method and request.url.path.startswith(prefix) for method,prefix in OPERATOR_MUTATIONS):
             return JSONResponse(status_code=403, content={"detail":"Administrator permission required"})
-        response = await call_next(request)
-        if getattr(request.state, "logout_requested", False):
-            await db.delete(session)
-        if bool(db.dirty or db.new or db.deleted) or getattr(request.state, "logout_requested", False):
-            try:
-                await db.commit()
-            except PoolTimeoutError:
-                await db.rollback()
-                raise
-            except SQLAlchemyError as exc:
-                await db.rollback()
-                logger.warning("auth_session_commit_failed", error_type=type(exc).__name__)
-                return JSONResponse(status_code=503, content={
-                    "detail": "Unable to save account changes. Please try again.",
-                    "code": "ACCOUNT_SAVE_FAILED",
-                })
-        return response
+        # Only these handlers intentionally mutate the authenticated account
+        # session. Keeping this single connection for them avoids a second
+        # transaction while every dashboard/API read returns its connection
+        # before the endpoint opens its normal dependency session.
+        if request.url.path in AUTH_SESSION_MUTATION_PATHS:
+            request.state.auth_db = db
+            response = await call_next(request)
+            if getattr(request.state, "logout_requested", False):
+                await db.delete(session)
+            if bool(db.dirty or db.new or db.deleted) or getattr(request.state, "logout_requested", False):
+                try:
+                    await db.commit()
+                except PoolTimeoutError:
+                    await db.rollback()
+                    raise
+                except SQLAlchemyError as exc:
+                    await db.rollback()
+                    logger.warning("auth_session_commit_failed", error_type=type(exc).__name__)
+                    return JSONResponse(status_code=503, content={
+                        "detail": "Unable to save account changes. Please try again.",
+                        "code": "ACCOUNT_SAVE_FAILED",
+                    })
+            return response
+
+        # Explicit close is intentional: some async drivers retain the pooled
+        # connection after commit until close/transaction-context exit. The
+        # authenticated ORM values remain usable because sessions use
+        # ``expire_on_commit=False``.
+        await db.close()
+
+    # The authentication session is now closed and its connection returned to
+    # the pool before dashboard endpoints acquire their own database session.
+    return await call_next(request)
 
 # Include Routers
 app.include_router(auth.router)

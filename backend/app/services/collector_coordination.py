@@ -5,21 +5,34 @@ until its lease expires.  Therefore another node can take over after a crash
 without relying on process-local state, shared disks, or a database-specific
 advisory lock.
 """
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError, TimeoutError as SQLAlchemyTimeoutError
 
 from app.config import get_settings
 from app.database import async_session_factory
 from app.models.platform import CollectorLease
-
 
 class CollectorCoordinator:
     def __init__(self):
         settings = get_settings()
         self.owner_id = settings.collector_id
         self.lease_seconds = max(10, settings.COLLECTOR_LEASE_SECONDS)
+        # One process must not issue concurrent gap-lock writes for different
+        # lease rows. Other collector nodes remain coordinated by the durable
+        # conditional SQL below.
+        self._mutation_lock = asyncio.Lock()
+
+    @staticmethod
+    def _is_retryable_conflict(error: OperationalError) -> bool:
+        original = getattr(error, "orig", None)
+        code = getattr(original, "errno", None)
+        if code is None:
+            args = getattr(original, "args", ())
+            code = args[0] if args else None
+        return code in {1205, 1213, "40001", "40P01"}
 
     async def claim(self, scope: str, lease_seconds: int | None = None) -> bool:
         """Acquire or renew a lease using conditional writes.
@@ -27,30 +40,45 @@ class CollectorCoordinator:
         A conditional update avoids a read-then-write race for an expired
         lease. A unique primary key resolves the first-claim race safely.
         """
-        now = datetime.now(timezone.utc)
-        expires_at = now + timedelta(seconds=max(10, lease_seconds or self.lease_seconds))
-        async with async_session_factory() as db:
-            renewed = await db.execute(update(CollectorLease).where(
-                CollectorLease.scope == scope,
-                (CollectorLease.owner_id == self.owner_id) | (CollectorLease.expires_at <= now),
-            ).values(owner_id=self.owner_id, expires_at=expires_at))
-            if renewed.rowcount:
-                await db.commit()
-                return True
-            try:
-                db.add(CollectorLease(scope=scope, owner_id=self.owner_id, expires_at=expires_at))
-                await db.commit()
-                return True
-            except IntegrityError:
-                await db.rollback()
-                return False
+        settings = get_settings()
+        attempts = max(1, settings.COLLECTOR_LEASE_RETRY_ATTEMPTS)
+        async with self._mutation_lock:
+            for attempt in range(attempts):
+                now = datetime.now(timezone.utc)
+                expires_at = now + timedelta(seconds=max(10, lease_seconds or self.lease_seconds))
+                try:
+                    async with async_session_factory() as db:
+                        renewed = await db.execute(update(CollectorLease).where(
+                            CollectorLease.scope == scope,
+                            (CollectorLease.owner_id == self.owner_id) | (CollectorLease.expires_at <= now),
+                        ).values(owner_id=self.owner_id, expires_at=expires_at))
+                        if renewed.rowcount:
+                            await db.commit()
+                            return True
+                        try:
+                            db.add(CollectorLease(scope=scope, owner_id=self.owner_id, expires_at=expires_at))
+                            await db.commit()
+                            return True
+                        except IntegrityError:
+                            await db.rollback()
+                            return False
+                except SQLAlchemyTimeoutError:
+                    # A saturated local pool is not ownership contention. The
+                    # caller will defer this unit to the next bounded cycle.
+                    return False
+                except OperationalError as error:
+                    if not self._is_retryable_conflict(error) or attempt + 1 >= attempts:
+                        raise
+                    await asyncio.sleep((max(1, settings.COLLECTOR_LEASE_RETRY_DELAY_MS) * (attempt + 1)) / 1000)
+            return False
 
     async def release(self, scope: str) -> None:
-        async with async_session_factory() as db:
-            await db.execute(delete(CollectorLease).where(
-                CollectorLease.scope == scope, CollectorLease.owner_id == self.owner_id,
-            ))
-            await db.commit()
+        async with self._mutation_lock:
+            async with async_session_factory() as db:
+                await db.execute(delete(CollectorLease).where(
+                    CollectorLease.scope == scope, CollectorLease.owner_id == self.owner_id,
+                ))
+                await db.commit()
 
 
 collector_coordinator = CollectorCoordinator()

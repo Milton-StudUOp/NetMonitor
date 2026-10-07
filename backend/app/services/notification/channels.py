@@ -26,6 +26,12 @@ def is_meta_whatsapp_api(url: str) -> bool:
     return urlparse(url).hostname == "graph.facebook.com"
 
 
+def notification_timeout() -> httpx.Timeout:
+    """Use one configured, bounded timeout for HTTP notification providers."""
+    seconds = max(1, get_settings().NOTIFICATION_CONNECT_TIMEOUT_SECONDS)
+    return httpx.Timeout(seconds, connect=seconds)
+
+
 def whatsapp_api_payload(config: dict, target: str, text: str) -> dict:
     if is_meta_whatsapp_api(config.get("api_url", "")):
         return {"messaging_product": "whatsapp", "recipient_type": "individual",
@@ -264,7 +270,7 @@ async def send_notification(
 
     if item.provider == "TELEGRAM":
         targets = recipient_targets("TELEGRAM", config, additional_recipients)
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=notification_timeout()) as client:
             for target in targets:
                 response = await client.post(
                     f"https://api.telegram.org/bot{secrets['bot_token']}/sendMessage",
@@ -276,7 +282,7 @@ async def send_notification(
     if item.provider == "WHATSAPP":
         text = content["whatsapp"]
         targets = recipient_targets("WHATSAPP", config, additional_recipients)
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=notification_timeout()) as client:
             for target in targets:
                 response = await client.post(
                     config["api_url"],
@@ -300,7 +306,7 @@ async def send_notification(
 
     def send_email() -> None:
         smtp_class = smtplib.SMTP_SSL if config.get("ssl") else smtplib.SMTP
-        smtp_kwargs = {"timeout": 10}
+        smtp_kwargs = {"timeout": max(1, get_settings().NOTIFICATION_CONNECT_TIMEOUT_SECONDS)}
         if config.get("ssl"):
             smtp_kwargs["context"] = verified_tls_context()
         with smtp_class(config["smtp_server"], int(config.get("smtp_port", 587)), **smtp_kwargs) as smtp:

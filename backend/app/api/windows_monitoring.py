@@ -3,7 +3,7 @@ from math import ceil
 from fnmatch import fnmatch
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -389,10 +389,23 @@ async def metrics_overview(db: AsyncSession = Depends(get_db)):
             active_capabilities[item.device_id] = item
     active_device_ids = set(active_capabilities)
     devices = (await db.execute(select(Device).where(Device.id.in_(active_device_ids)).order_by(Device.name))).scalars().all() if active_device_ids else []
+    latest_metric_time = select(
+        SystemMetricSnapshot.device_id.label("device_id"),
+        func.max(SystemMetricSnapshot.collected_at).label("collected_at"),
+    ).where(SystemMetricSnapshot.device_id.in_(active_device_ids)).group_by(
+        SystemMetricSnapshot.device_id
+    ).subquery()
+    latest_by_device = {
+        item.device_id: item
+        for item in (await db.execute(select(SystemMetricSnapshot).join(
+            latest_metric_time,
+            and_(SystemMetricSnapshot.device_id == latest_metric_time.c.device_id,
+                 SystemMetricSnapshot.collected_at == latest_metric_time.c.collected_at),
+        ))).scalars().all()
+    } if active_device_ids else {}
     result = []
     for device in devices:
-        latest = (await db.execute(select(SystemMetricSnapshot).where(SystemMetricSnapshot.device_id == device.id)
-            .order_by(SystemMetricSnapshot.collected_at.desc()).limit(1))).scalar_one_or_none()
+        latest = latest_by_device.get(device.id)
         enabled_metrics = list((active_capabilities[device.id].diagnostics or {}).get("enabled_metrics", []))
         snapshot = _metric_snapshot(latest) if latest else None
         if snapshot:

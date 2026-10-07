@@ -1,4 +1,3 @@
-import asyncio
 import structlog
 from datetime import datetime
 from typing import Optional, List
@@ -7,10 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.alert import Alert, AlertSeverity
 from app.api.websocket import manager as ws_manager
-from app.services.notification.email import send_email_alert
-from app.services.notification.teams import send_teams_alert
-from app.services.notification.telegram import send_telegram_alert
-from app.services.notification.dispatcher import dispatch_persisted_notifications, schedule_persisted_notification
+from app.services.notification.dispatcher import schedule_persisted_notification
 
 logger = structlog.get_logger()
 
@@ -74,8 +70,10 @@ async def trigger_alert(
         "created_at": alert.created_at.isoformat(),
     })
 
-    # Async notification dispatch
-    asyncio.create_task(_dispatch_notifications(title, message, severity.value, alert.id))
+    # The persisted rule dispatcher is the single notification path. It
+    # snapshots the configuration before network I/O and applies recipient,
+    # reminder, and recovery rules consistently for every provider.
+    schedule_persisted_notification(title, message, severity.value, alert.id)
     return alert
 
 
@@ -122,14 +120,3 @@ async def auto_resolve_alerts(
             )
 
     return resolved
-
-
-async def _dispatch_notifications(title: str, message: str, severity: str, alert_id: int):
-    channels = []
-    if await send_email_alert(title, message, severity):
-        channels.append("email")
-    if await send_teams_alert(title, message, severity):
-        channels.append("teams")
-    if await send_telegram_alert(title, message, severity):
-        channels.append("telegram")
-    await dispatch_persisted_notifications(title, message, severity, alert_id)

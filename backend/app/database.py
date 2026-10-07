@@ -25,10 +25,10 @@ def _create_engine(url: str):
         # MySQL connection budget.
         kwargs.update({
             "pool_pre_ping": True,
-            "pool_size": 5,
-            "max_overflow": 5,
-            "pool_timeout": 15,
-            "pool_recycle": 1800,
+            "pool_size": max(1, settings.DATABASE_POOL_SIZE),
+            "max_overflow": max(0, settings.DATABASE_MAX_OVERFLOW),
+            "pool_timeout": max(1, settings.DATABASE_POOL_TIMEOUT),
+            "pool_recycle": max(60, settings.DATABASE_POOL_RECYCLE_SECONDS),
         })
         if url.startswith("mysql"):
             kwargs["connect_args"] = {"init_command": "SET time_zone = '+00:00'"}

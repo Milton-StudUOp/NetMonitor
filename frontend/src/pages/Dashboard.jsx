@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useEffect, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { Server, Network, GitFork, AlertTriangle } from 'lucide-react';
 import api from '../api/client';
 import StatusCard from '../components/StatusCard';
@@ -12,8 +12,11 @@ export default function Dashboard({user}) {
   const [summary, setSummary] = useState(null);
   const [alerts, setAlerts] = useState([]);
   const [topology, setTopology] = useState(null);
+  const loadingDashboard = useRef(false);
 
   const fetchData = async () => {
+    if (loadingDashboard.current) return;
+    loadingDashboard.current = true;
     try {
       const [sumRes, alertRes, topoRes] = await Promise.all([
         api.get('/dashboard/summary'),
@@ -25,12 +28,14 @@ export default function Dashboard({user}) {
       setTopology(topoRes.data);
     } catch (err) {
       console.error('Failed to fetch dashboard data:', err);
+    } finally {
+      loadingDashboard.current = false;
     }
   };
 
   useEffect(() => {
     fetchData();
-    const interval = setInterval(fetchData, 5000);
+    const interval = setInterval(fetchData, 15000);
     return () => clearInterval(interval);
   }, []);
 

@@ -12,13 +12,14 @@ from app.models.device import Device
 from app.models.link import Link
 from app.models.platform import NotificationDelivery, NotificationIntegration, NotificationRule
 from app.models.redundancy_group import RedundancyGroup
-from app.services.notification.channels import environment_email_integration, send_notification
+from app.services.notification.channels import environment_email_integration, safe_delivery_error, send_notification
 
 logger = structlog.get_logger()
 SEVERITY_RANK = {"INFORMATION": 0, "WARNING": 1, "CRITICAL": 2}
 _dispatch_semaphore = asyncio.Semaphore(max(1, get_settings().NOTIFICATION_CONCURRENCY))
 _dispatch_tasks: set[asyncio.Task] = set()
 _inflight: set[tuple[int, bool]] = set()
+_failure_log_at: dict[tuple[str, int], datetime] = {}
 
 
 def schedule_persisted_notification(title: str, message: str, severity: str, alert_id: int,
@@ -122,8 +123,16 @@ async def _dispatch_bounded(title: str, message: str, severity: str, alert_id: i
                 await send_notification(integration, title, message, delivery_severity, recipients, context)
                 rule_sent = True
             except Exception as exc:
-                logger.error("persisted_notification_failed", provider=channel, rule_id=rule_id,
-                             error=type(exc).__name__)
+                # A DNS outage or an unavailable local WhatsApp bridge must
+                # not turn each monitoring cycle into a log storm. Retain a
+                # safe, actionable reason and emit it at a bounded cadence.
+                failure_key = (channel, rule_id)
+                previous = _failure_log_at.get(failure_key)
+                cooldown = max(1, get_settings().NOTIFICATION_FAILURE_LOG_COOLDOWN_SECONDS)
+                if previous is None or now - previous >= timedelta(seconds=cooldown):
+                    _failure_log_at[failure_key] = now
+                    logger.warning("persisted_notification_failed", provider=channel, rule_id=rule_id,
+                                   error_type=type(exc).__name__, reason=safe_delivery_error(exc))
         if rule_sent:
             delivered_rule_ids.append(rule_id)
 

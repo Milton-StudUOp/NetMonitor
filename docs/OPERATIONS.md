@@ -176,6 +176,16 @@ Notification-rule severity is a minimum threshold. For example, a rule configure
 4. Inspect **System Health** for the latest notification-delivery status and sanitized error category.
 5. Verify SMTP network access, recipient addresses, and TLS mode: STARTTLS on port 587 or implicit TLS on port 465.
 
+`gaierror` means the configured SMTP hostname cannot be resolved by the backend
+host. `ConnectError` for WhatsApp means its configured HTTP endpoint is not
+reachable. These are infrastructure/configuration failures, not evidence that a
+device is down. Delivery attempts are concurrency-limited and identical failure
+logs are rate-limited; correct DNS, routing/firewall rules, service availability,
+or the configured endpoint instead of increasing retry concurrency. Configure
+the limits with `NOTIFICATION_CONCURRENCY`,
+`NOTIFICATION_CONNECT_TIMEOUT_SECONDS`, and
+`NOTIFICATION_FAILURE_LOG_COOLDOWN_SECONDS`.
+
 Do not lower TLS verification or print credentials while diagnosing delivery.
 
 Production defaults suppress SQL statement logging, SQL parameters, per-device probe noise, and Uvicorn access lines. Do not add tokens, SMTP credentials, SNMP secrets, full exception strings, or inventory addresses to terminal logs. Security-relevant outcomes belong in the database audit trail using non-secret summaries.
@@ -222,6 +232,8 @@ Raw monitoring samples are retained according to the administrator setting. An i
 3. Deletes only the raw records included in the completed batch.
 4. Removes aggregates beyond aggregate retention.
 5. Removes old resolved alerts while preserving active alerts.
+6. Every five minutes, removes one bounded batch of expired detailed
+   system-metric snapshots and service-check history.
 
 Compound indexes support target/time and status/time history queries. Reports include aggregate sample counts when the corresponding raw samples no longer exist.
 
@@ -247,6 +259,25 @@ An empty local SQLite file does not prove data loss when the installation previo
 
 ## Validation commands
 
+### Emergency raw-history pruning
+
+Raw `monitoring_results` are capped at seven days by
+`RAW_METRIC_RETENTION_DAYS=7`. To remove an existing backlog immediately,
+stop collector replicas first and run the portable batch pruner from the active
+backend environment. It deletes only rows older than the configured cutoff:
+
+```bash
+cd backend
+source venv/bin/activate
+python prune_monitoring_results.py
+python prune_monitoring_results.py --apply --batch-size 500
+```
+
+The first command only reports the eligible count. The second commits each
+batch independently, retries MySQL lock conflicts, and can be interrupted
+safely; re-run it to continue. Stop collector/API writers before a large
+backlog cleanup whenever possible.
+
 ### Database pool saturation during authentication
 
 `QueuePool limit ... reached` means requests exhausted the available database
@@ -260,6 +291,24 @@ endpoint. Account mutations start a new transaction in the same session. Pool
 timeouts return HTTP 503 with `DATABASE_BUSY` and `Retry-After: 5`, preserving the
 browser's authentication token. Failed account commits return an error rather
 than reporting success. Restart the API process to load this change.
+
+For server databases, tune the pool only through environment variables and
+restart the backend after changing them:
+
+```dotenv
+DATABASE_POOL_SIZE=10
+DATABASE_MAX_OVERFLOW=10
+DATABASE_POOL_TIMEOUT=20
+DATABASE_POOL_RECYCLE_SECONDS=1800
+```
+
+The effective maximum per process is `DATABASE_POOL_SIZE +
+DATABASE_MAX_OVERFLOW`. Multiply that by API and collector replicas, then keep
+the result within the database server's supported connection budget. Do not use
+an unbounded pool as a workaround. NetMonitor releases database sessions before
+ICMP, SSH, SNMP, WinRM, SMTP, and HTTP provider I/O; recurring pool timeouts
+after this change indicate database latency, too many replicas, or an
+undersized server connection budget.
 
 The regression tests in `backend/tests/test_auth_pool.py` use a disposable SQLite
 database and a single-connection pool to check concurrent requests, account

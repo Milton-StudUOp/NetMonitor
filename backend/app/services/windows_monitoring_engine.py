@@ -4,7 +4,7 @@ from time import perf_counter
 
 import structlog
 from sqlalchemy import and_, or_, select
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import OperationalError, TimeoutError as SQLAlchemyTimeoutError
 
 from app.database import async_session_factory
 from app.models.alert import Alert, AlertSeverity
@@ -20,6 +20,16 @@ from app.services.collector_coordination import collector_coordinator
 from app.config import get_settings
 
 logger = structlog.get_logger()
+
+
+def database_error_code(error: Exception) -> int | str | None:
+    """Return only a portable database error code, never connection details."""
+    original = getattr(error, "orig", None)
+    candidate = getattr(original, "errno", None)
+    if isinstance(candidate, (int, str)):
+        return candidate
+    args = getattr(original, "args", ())
+    return args[0] if args and isinstance(args[0], (int, str)) else None
 
 
 def service_state_transition(current: str, healthy: bool, failures: int, successes: int,
@@ -46,12 +56,24 @@ class WindowsMonitoringEngine:
     async def stop_and_wait(self):
         self._running = False
         if self._task:
-            self._task.cancel(); await asyncio.gather(self._task, return_exceptions=True); self._task = None
+            self._task.cancel()
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(self._task, return_exceptions=True),
+                    timeout=max(1, get_settings().SHUTDOWN_GRACE_SECONDS),
+                )
+            except asyncio.TimeoutError:
+                logger.warning("remote_monitoring_shutdown_timed_out")
+            self._task = None
 
     async def _loop(self):
         while self._running:
             try:
                 await self.run_due_checks()
+            except SQLAlchemyTimeoutError:
+                # The API/collector pool is busy. Do not immediately retry: a
+                # second simultaneous query only prolongs the saturation.
+                logger.warning("remote_monitoring_database_busy")
             except OperationalError:
                 # A collector can race with schema/startup work or encounter a
                 # recycled MySQL connection. Retry once without stopping or
@@ -86,31 +108,24 @@ class WindowsMonitoringEngine:
                                  if (item.diagnostics or {}).get("enabled_metrics") and self._metric_is_due(item, metric_due_before)]
         device_ids = set(service_device_ids)
         device_ids.update(metric_device_ids)
-        claimed_ids = await self._claim_due_checks(device_ids)
+        # Do not open a lease transaction for every due device before worker
+        # capacity is available. Each worker claims its own unit of work while
+        # holding a bounded collector slot, which keeps database demand capped
+        # even when thousands of devices are due at once.
+        selected_ids = sorted(device_ids)
+        batch_limit = max(0, get_settings().REMOTE_MONITORING_BATCH_SIZE)
+        if batch_limit:
+            selected_ids = selected_ids[:batch_limit]
         results = await asyncio.gather(
-            *(self._check_device(device_id, now, claimed=True) for device_id in claimed_ids),
+            *(self._check_device(device_id, now) for device_id in selected_ids),
             return_exceptions=True,
         )
-        for device_id, result in zip(claimed_ids, results):
+        for device_id, result in zip(selected_ids, results):
             if isinstance(result, Exception):
-                logger.warning("remote_monitoring_device_failed", device_id=device_id,
-                    error_type=type(result).__name__)
-
-    async def _claim_due_checks(self, device_ids: set[int]) -> list[int]:
-        """Claim remote checks before creating local tasks.
-
-        Iterating beyond an unavailable lease lets a second collector claim the
-        next devices in the sorted work set instead of repeatedly contending
-        for the same first batch.
-        """
-        claim_limit = max(0, get_settings().REMOTE_MONITORING_BATCH_SIZE)
-        claimed: list[int] = []
-        for device_id in sorted(device_ids):
-            if claim_limit and len(claimed) >= claim_limit:
-                break
-            if await collector_coordinator.claim(f"remote-check:{device_id}"):
-                claimed.append(device_id)
-        return claimed
+                fields = {"device_id": device_id, "error_type": type(result).__name__}
+                if isinstance(result, OperationalError):
+                    fields["database_code"] = database_error_code(result)
+                logger.warning("remote_monitoring_device_failed", **fields)
 
     @staticmethod
     def _metric_is_due(capability: DeviceCapability, due_before: datetime) -> bool:
@@ -121,7 +136,7 @@ class WindowsMonitoringEngine:
             last_collected = last_collected.replace(tzinfo=timezone.utc)
         return last_collected <= due_before
 
-    async def _check_device(self, device_id: int, now: datetime, claimed: bool = False):
+    async def _check_device(self, device_id: int, now: datetime):
         # Build the transport while a short-lived database session is open,
         # then release that session before SSH, SNMP, or WinRM performs any
         # network I/O. A slow remote host must consume a collector slot, not a
@@ -129,9 +144,9 @@ class WindowsMonitoringEngine:
         async with self._semaphore:
             scope = f"remote-check:{device_id}"
             provider = None
-            if not claimed and not await collector_coordinator.claim(scope):
-                return
             try:
+                if not await collector_coordinator.claim(scope):
+                    return
                 context = await self._load_check_context(device_id, now)
                 if context is None:
                     return
@@ -153,6 +168,13 @@ class WindowsMonitoringEngine:
                 )
             except asyncio.CancelledError:
                 raise
+            except OperationalError as exc:
+                logger.warning("remote_monitoring_device_database_failed", device_id=device_id,
+                    database_code=database_error_code(exc))
+            except SQLAlchemyTimeoutError:
+                # Defer quietly: the next scheduler pass retries after the
+                # database pool becomes available.
+                return
             except Exception as exc:
                 logger.warning("remote_monitoring_device_failed", device_id=device_id,
                     error_type=type(exc).__name__)
@@ -163,7 +185,10 @@ class WindowsMonitoringEngine:
                     except Exception as exc:
                         logger.warning("remote_provider_close_failed", device_id=device_id,
                                        error_type=type(exc).__name__)
-                await collector_coordinator.release(scope)
+                # Keep successful work leases until their natural expiry. The
+                # owner can renew them on the next due check and another
+                # collector takes over after expiry. Avoiding a delete per
+                # device removes MySQL gap-lock contention under load.
 
     async def _load_check_context(self, device_id: int, now: datetime):
         async with async_session_factory() as db:

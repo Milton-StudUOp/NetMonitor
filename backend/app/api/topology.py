@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,8 +38,17 @@ async def get_topology(db: AsyncSession = Depends(get_db)):
     for item in capability_rows:
         if (item.device_id, item.provider) in enabled_providers and (item.diagnostics or {}).get("enabled_metrics"):
             capabilities.setdefault(item.device_id, item)
-    metric_rows = (await db.execute(select(SystemMetricSnapshot).order_by(
-        SystemMetricSnapshot.device_id, SystemMetricSnapshot.collected_at.desc()))).scalars().all()
+    # Loading every historical metric sample made topology latency grow with
+    # retention. Fetch exactly the latest sample for each device instead.
+    latest_metric_time = select(
+        SystemMetricSnapshot.device_id.label("device_id"),
+        func.max(SystemMetricSnapshot.collected_at).label("collected_at"),
+    ).group_by(SystemMetricSnapshot.device_id).subquery()
+    metric_rows = (await db.execute(select(SystemMetricSnapshot).join(
+        latest_metric_time,
+        and_(SystemMetricSnapshot.device_id == latest_metric_time.c.device_id,
+             SystemMetricSnapshot.collected_at == latest_metric_time.c.collected_at),
+    ))).scalars().all()
     latest_metrics = {}
     for item in metric_rows:
         latest_metrics.setdefault(item.device_id, item)
