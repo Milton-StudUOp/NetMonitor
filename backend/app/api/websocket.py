@@ -4,6 +4,7 @@ from typing import List
 import structlog
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
+from sqlalchemy.exc import SQLAlchemyError, TimeoutError as SQLAlchemyTimeoutError
 from app.config import get_settings
 from app.database import async_session_factory
 from app.services.auth_service import authenticate_token
@@ -69,11 +70,18 @@ async def websocket_endpoint(websocket: WebSocket):
             await close_if_connected(websocket, code=4401)
             return
         token = auth_message.get("token", "") if isinstance(auth_message, dict) and auth_message.get("type") == "authenticate" else ""
-        async with async_session_factory() as db:
-            if not token or not await authenticate_token(db, token):
-                await close_if_connected(websocket, code=4401)
-                return
-            await db.commit()
+        try:
+            async with async_session_factory() as db:
+                if not token or not await authenticate_token(db, token):
+                    await close_if_connected(websocket, code=4401)
+                    return
+                await db.commit()
+        except (SQLAlchemyTimeoutError, SQLAlchemyError):
+            # Do not leak a pool trace through ASGI when the database is under
+            # pressure. The browser reconnects with exponential backoff.
+            logger.warning("ws_auth_database_unavailable")
+            await close_if_connected(websocket, code=1013)
+            return
     try:
         await manager.connect(websocket, accept=False)
         registered = True

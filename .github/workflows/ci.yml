@@ -2,16 +2,17 @@ name: CI
 
 on:
   push:
-    branches: [main, premium]
+    branches: [main, dev, premium]
   pull_request:
-    branches: [main, premium]
+    branches: [main, dev, premium]
 
 permissions:
   contents: read
 
 jobs:
   backend:
-    runs-on: ubuntu-latest
+    # Pin the runner image so CI remains reproducible across runner migrations.
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:16-alpine
@@ -55,7 +56,8 @@ jobs:
       - run: python -c "from sqlalchemy.orm import configure_mappers; import app.models; configure_mappers()"
 
   frontend:
-    runs-on: ubuntu-latest
+    # Pin the runner image so CI remains reproducible across runner migrations.
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: frontend

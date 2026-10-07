@@ -22,6 +22,13 @@ class Settings(BaseSettings):
 
     # Database
     DATABASE_URL: str = "sqlite+aiosqlite:///./network_monitor.db"
+    # SQLAlchemy pool limits apply only to server databases. They are kept as
+    # deployment settings because the right values depend on the database
+    # server's connection budget and the number of API/collector replicas.
+    DATABASE_POOL_SIZE: int = 10
+    DATABASE_MAX_OVERFLOW: int = 10
+    DATABASE_POOL_TIMEOUT: int = 20
+    DATABASE_POOL_RECYCLE_SECONDS: int = 1800
 
     # Redis
     # Empty uses the backend host timezone; an IANA name also works in containers.
@@ -57,6 +64,8 @@ class Settings(BaseSettings):
     SNMP_TRANSPORT_CONCURRENCY: int = 16
     COLLECTOR_ID: str = ""
     COLLECTOR_LEASE_SECONDS: int = 45
+    COLLECTOR_LEASE_RETRY_ATTEMPTS: int = 3
+    COLLECTOR_LEASE_RETRY_DELAY_MS: int = 75
     COLLECTOR_ENABLED: bool = True
     # Zero keeps the local single-collector behaviour. In an HA topology use
     # a finite value so a first-started node cannot claim the whole estate.
@@ -67,6 +76,13 @@ class Settings(BaseSettings):
     # concurrency below the database pool and never hold a DB connection
     # while waiting for an external service.
     NOTIFICATION_CONCURRENCY: int = 4
+    NOTIFICATION_CONNECT_TIMEOUT_SECONDS: int = 10
+    NOTIFICATION_FAILURE_LOG_COOLDOWN_SECONDS: int = 300
+    SHUTDOWN_GRACE_SECONDS: int = 8
+    RETENTION_CLEANUP_BATCH_SIZE: int = 5000
+    # Upper bound for raw probe, service-history, and detailed metric data.
+    # Long-term availability remains available through MetricAggregate.
+    RAW_METRIC_RETENTION_DAYS: int = 7
 
     # State machine thresholds
     FAILURES_TO_DOWN: int = 3

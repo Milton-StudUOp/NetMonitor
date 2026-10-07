@@ -234,7 +234,7 @@ class ServiceTopologySnapshotInput(ServiceTopologyLayoutInput):
 
 class SystemSettingsInput(BaseModel):
     timezone: str = "UTC"
-    retention_days: int = Field(default=90, ge=1, le=3650)
+    retention_days: int = Field(default=7, ge=1, le=3650)
     aggregate_retention_days: int = Field(default=1825, ge=30, le=7300)
     default_monitoring_interval: int = Field(default=30, ge=1)
     failure_threshold: int = Field(default=3, ge=1)

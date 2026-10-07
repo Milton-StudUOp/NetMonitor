@@ -2,7 +2,7 @@ import asyncio
 import structlog
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import delete, or_, select, update
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import OperationalError, TimeoutError as SQLAlchemyTimeoutError
 from sqlalchemy.orm import selectinload
 
 from app.database import async_session_factory
@@ -20,6 +20,7 @@ from app.services.alert_engine import trigger_alert, auto_resolve_alerts
 from app.api.websocket import manager as ws_manager
 from app.models.platform import SystemSetting
 from app.models.alert import Alert
+from app.models.monitoring_provider import ServiceCheckHistory, SystemMetricSnapshot
 from app.config import get_settings
 from app.services.collector_coordination import collector_coordinator
 
@@ -50,7 +51,7 @@ class MonitoringEngine:
         self._probe_batch_size = get_settings().MONITORING_PROBE_BATCH_SIZE
         self._failures_to_down = state_tracker.failures_to_down
         self._successes_to_up = state_tracker.successes_to_up
-        self._retention_days = 90
+        self._retention_days = get_settings().RAW_METRIC_RETENTION_DAYS
         self._aggregate_retention_days = 1825
         self._last_retention_cleanup: datetime | None = None
         self.last_cycle_started_at: datetime | None = None
@@ -74,7 +75,8 @@ class MonitoringEngine:
                 "probe_concurrency", get_settings().MONITORING_PROBE_CONCURRENCY)), 500))
             self._probe_batch_size = max(1, min(int(values.get(
                 "probe_batch_size", get_settings().MONITORING_PROBE_BATCH_SIZE)), 5000))
-            self._retention_days = max(1, int(values.get("retention_days", 90)))
+            requested_retention = max(1, int(values.get("retention_days", get_settings().RAW_METRIC_RETENTION_DAYS)))
+            self._retention_days = min(requested_retention, get_settings().RAW_METRIC_RETENTION_DAYS)
             self._aggregate_retention_days = max(self._retention_days, int(values.get("aggregate_retention_days", 1825)))
             state_tracker.failures_to_down = max(1, int(values.get("failure_threshold", state_tracker.failures_to_down)))
             state_tracker.successes_to_up = max(1, int(values.get("success_threshold", state_tracker.successes_to_up)))
@@ -105,23 +107,32 @@ class MonitoringEngine:
         tasks = [task for task in (self._task, self._maintenance_task) if task]
         self.stop()
         if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*tasks, return_exceptions=True),
+                    timeout=max(1, get_settings().SHUTDOWN_GRACE_SECONDS),
+                )
+            except asyncio.TimeoutError:
+                logger.warning("monitoring_engine_shutdown_timed_out")
         self._task = None
         self._maintenance_task = None
-        await collector_coordinator.release("topology-evaluation")
-        await collector_coordinator.release("retention-maintenance")
+        # Leases expire automatically. Do not wait for an unhealthy database
+        # during process shutdown; another collector can safely claim them.
 
     async def _main_loop(self):
         while self._running:
             self.last_cycle_started_at = datetime.now(timezone.utc)
             next_interval = self._cycle_interval
             try:
-                async with async_session_factory() as db:
-                    await self._probe_all_devices(db)
-                    # Link/redundancy history is global rather than
-                    # device-owned. A renewable lease elects one collector to
-                    # write it, while a surviving node assumes it on expiry.
-                    if await collector_coordinator.claim("topology-evaluation"):
+                # Claim before opening the topology transaction. This avoids
+                # holding one pooled connection while the lease uses another.
+                evaluate_topology = await collector_coordinator.claim("topology-evaluation")
+                await self._probe_all_devices()
+                # Link/redundancy history is global rather than device-owned.
+                # A renewable lease elects one collector to write it, while a
+                # surviving node assumes it on expiry.
+                if evaluate_topology:
+                    async with async_session_factory() as db:
                         await self._probe_all_links(db)
                         await self._evaluate_all_redundancy_groups(db)
                 self.last_cycle_completed_at = datetime.now(timezone.utc)
@@ -130,8 +141,8 @@ class MonitoringEngine:
                 self.database_failure_streak = 0
             except asyncio.CancelledError:
                 break
-            except OperationalError as error:
-                self.last_cycle_error = "OperationalError"; self.failed_cycles += 1
+            except (OperationalError, SQLAlchemyTimeoutError) as error:
+                self.last_cycle_error = type(error).__name__; self.failed_cycles += 1
                 self.database_failure_streak += 1
                 next_interval = max(self._cycle_interval, min(60, 2 ** min(self.database_failure_streak, 6)))
                 original = getattr(error, "orig", None)
@@ -156,17 +167,22 @@ class MonitoringEngine:
     async def _maintenance_loop(self):
         while self._running:
             try:
-                # Retention merges/deletes aggregate history and must have a
-                # single writer. Five minutes balances takeover speed with a
-                # bounded cleanup run on a large database.
+                # Detailed history is trimmed in a small transaction every
+                # five minutes. Availability aggregation remains hourly.
                 if await collector_coordinator.claim("retention-maintenance", lease_seconds=300):
                     async with async_session_factory() as db:
+                        await self._cleanup_detailed_history(db)
                         await self._cleanup_retention(db)
             except asyncio.CancelledError:
                 break
             except Exception as error:
                 logger.error("retention_cleanup_failed", error_type=type(error).__name__)
-            await asyncio.sleep(3600)
+            await asyncio.sleep(300)
+
+    async def _cleanup_detailed_history(self, db):
+        cutoff = datetime.now(timezone.utc) - timedelta(days=self._retention_days)
+        await self._delete_expired_batch(db, SystemMetricSnapshot, SystemMetricSnapshot.collected_at, cutoff)
+        await self._delete_expired_batch(db, ServiceCheckHistory, ServiceCheckHistory.checked_at, cutoff)
 
     async def _cleanup_retention(self, db):
         now = datetime.now(timezone.utc)
@@ -176,7 +192,19 @@ class MonitoringEngine:
         aggregate_cutoff = now - timedelta(days=self._aggregate_retention_days)
         await db.execute(delete(MetricAggregate).where(MetricAggregate.bucket_start < aggregate_cutoff))
         await db.execute(delete(Alert).where(Alert.is_resolved == True, Alert.resolved_at < cutoff))
-        await db.commit(); self._last_retention_cleanup = now
+        await db.commit()
+        self._last_retention_cleanup = now
+
+    async def _delete_expired_batch(self, db, model, timestamp_column, cutoff) -> int:
+        batch_size = max(100, get_settings().RETENTION_CLEANUP_BATCH_SIZE)
+        identifiers = (await db.execute(
+            select(model.id).where(timestamp_column < cutoff).order_by(model.id).limit(batch_size)
+        )).scalars().all()
+        if not identifiers:
+            return 0
+        await db.execute(delete(model).where(model.id.in_(identifiers)))
+        await db.commit()
+        return len(identifiers)
 
     async def _aggregate_expiring_records(self, db, cutoff):
         batch_size = 5000
@@ -230,18 +258,17 @@ class MonitoringEngine:
             await db.execute(delete(MonitoringResult).where(MonitoringResult.id.in_([item.id for item in records])))
             await db.commit()
 
-    async def _probe_all_devices(self, db):
-        devices = (await db.execute(select(Device).options(
-            selectinload(Device.gateway_device),
-            selectinload(Device.primary_link),
-        ))).scalars().all()
+    async def _probe_all_devices(self):
+        """Claim and persist quickly; never retain a DB connection during ICMP."""
         now = datetime.now(timezone.utc)
-        due_devices = [device for device in devices if self._device_is_due(device, now)]
-        due_devices.sort(key=lambda device: self._normalise_timestamp(device.last_monitored_at) or datetime.min.replace(tzinfo=timezone.utc))
-        self.last_deferred_device_probe_count = max(0, len(due_devices) - self._probe_batch_size)
-        due_devices = due_devices[:self._probe_batch_size]
-        selected_due_count = len(due_devices)
-        due_devices = await self._claim_due_devices(db, due_devices, now)
+        async with async_session_factory() as db:
+            devices = (await db.execute(select(Device))).scalars().all()
+            due_devices = [device for device in devices if self._device_is_due(device, now)]
+            due_devices.sort(key=lambda device: self._normalise_timestamp(device.last_monitored_at) or datetime.min.replace(tzinfo=timezone.utc))
+            self.last_deferred_device_probe_count = max(0, len(due_devices) - self._probe_batch_size)
+            due_devices = due_devices[:self._probe_batch_size]
+            selected_due_count = len(due_devices)
+            due_devices = await self._claim_due_devices(db, due_devices, now)
         self.last_deferred_device_probe_count += selected_due_count - len(due_devices)
         self.last_claimed_device_probe_count = len(due_devices)
         self.last_device_probe_count = len(due_devices)
@@ -253,71 +280,83 @@ class MonitoringEngine:
             for device, result in probe_results
             if (device.ip_address or "").strip()
         }
-        status_events: list[dict] = []
         self.last_invalid_device_probe_count = sum(
             result.get("probe_valid", True) is False for _, result in probe_results
         )
+        probe_by_device_id = {device.id: result for device, result in probe_results}
+        if not probe_by_device_id:
+            return
 
-        for device, ping_res in probe_results:
-            if not device.ip_address:
-                continue
-            self._latest_device_probes[device.id] = ping_res
-            if ping_res.get("probe_valid", True) is False:
-                # A local collector failure is not evidence that the device is
-                # down. Preserve hysteresis and operational state and do not
-                # manufacture an UNKNOWN communication sample. System Health
-                # reports the collector error separately.
+        status_events: list[dict] = []
+        # Reload relationships after remote I/O. The earlier session has
+        # already returned its connection to the pool, and this instance sees
+        # changes made by other collector replicas while probes were running.
+        async with async_session_factory() as db:
+            current_devices = (await db.execute(select(Device).where(Device.id.in_(probe_by_device_id)).options(
+                selectinload(Device.gateway_device),
+                selectinload(Device.primary_link),
+            ))).scalars().all()
+            for device in current_devices:
+                ping_res = probe_by_device_id[device.id]
+                if not device.ip_address:
+                    continue
+                self._latest_device_probes[device.id] = ping_res
+                if ping_res.get("probe_valid", True) is False:
+                    # A local collector failure is not evidence that the device is
+                    # down. Preserve hysteresis and operational state and do not
+                    # manufacture an UNKNOWN communication sample. System Health
+                    # reports the collector error separately.
+                    device.last_monitored_at = now
+                    continue
+                is_up = ping_res["is_up"]
+                dependency_down, dependency_reason = await self._detect_downstream_dependency(
+                    device, gateway_ping_cache, probe_by_ip)
+                stable_state = self._advance_device_state(device, is_up)
+                new_status = DeviceStatus.ONLINE if stable_state == "UP" else (
+                    DeviceStatus.UNKNOWN if stable_state == "UNKNOWN" else
+                    (DeviceStatus.DEGRADED if dependency_down else DeviceStatus.OFFLINE)
+                )
+                if device.status != new_status:
+                    device.status = new_status
+                    status_events.append({
+                        "id": device.id,
+                        "name": device.name,
+                        "status": new_status.value,
+                    })
+
+                    # Trigger real alerts on status change
+                    if new_status == DeviceStatus.OFFLINE:
+                        await trigger_alert(
+                            severity=device_status_alert_severity(new_status),
+                            title=f"Device unavailable: {device.name}",
+                            message=f"The device '{device.name}' (IP: {device.ip_address}) did not respond to ICMP probes.",
+                            db=db,
+                            device_id=device.id,
+                            root_cause="No ICMP response. The device may be powered off, unreachable, or physically disconnected.",
+                        )
+                    elif new_status == DeviceStatus.DEGRADED:
+                        await trigger_alert(
+                            severity=device_status_alert_severity(new_status),
+                            title=f"Device affected by an upstream dependency: {device.name}",
+                            message=f"The device '{device.name}' did not respond and its gateway or primary link is likely unavailable.",
+                            db=db,
+                            device_id=device.id,
+                            root_cause=dependency_reason,
+                        )
+                    elif new_status == DeviceStatus.ONLINE:
+                        await auto_resolve_alerts(db, device_id=device.id)
+
+                # Record time-series result
+                res_entry = MonitoringResult(
+                    target_type=MonitoringTargetType.DEVICE,
+                    target_id=device.id,
+                    status=MonitoringStatus.UP if is_up else MonitoringStatus.DOWN,
+                    latency_ms=ping_res.get("latency_ms"),
+                    packet_loss_pct=ping_res.get("packet_loss_pct"),
+                )
+                db.add(res_entry)
                 device.last_monitored_at = now
-                continue
-            is_up = ping_res["is_up"]
-            dependency_down, dependency_reason = await self._detect_downstream_dependency(
-                device, gateway_ping_cache, probe_by_ip)
-            stable_state = self._advance_device_state(device, is_up)
-            new_status = DeviceStatus.ONLINE if stable_state == "UP" else (
-                DeviceStatus.UNKNOWN if stable_state == "UNKNOWN" else
-                (DeviceStatus.DEGRADED if dependency_down else DeviceStatus.OFFLINE)
-            )
-            if device.status != new_status:
-                device.status = new_status
-                status_events.append({
-                    "id": device.id,
-                    "name": device.name,
-                    "status": new_status.value,
-                })
-
-                # Trigger real alerts on status change
-                if new_status == DeviceStatus.OFFLINE:
-                    await trigger_alert(
-                        severity=device_status_alert_severity(new_status),
-                        title=f"Device unavailable: {device.name}",
-                        message=f"The device '{device.name}' (IP: {device.ip_address}) did not respond to ICMP probes.",
-                        db=db,
-                        device_id=device.id,
-                        root_cause="No ICMP response. The device may be powered off, unreachable, or physically disconnected.",
-                    )
-                elif new_status == DeviceStatus.DEGRADED:
-                    await trigger_alert(
-                        severity=device_status_alert_severity(new_status),
-                        title=f"Device affected by an upstream dependency: {device.name}",
-                        message=f"The device '{device.name}' did not respond and its gateway or primary link is likely unavailable.",
-                        db=db,
-                        device_id=device.id,
-                        root_cause=dependency_reason,
-                    )
-                elif new_status == DeviceStatus.ONLINE:
-                    await auto_resolve_alerts(db, device_id=device.id)
-
-            # Record time-series result
-            res_entry = MonitoringResult(
-                target_type=MonitoringTargetType.DEVICE,
-                target_id=device.id,
-                status=MonitoringStatus.UP if is_up else MonitoringStatus.DOWN,
-                latency_ms=ping_res.get("latency_ms"),
-                packet_loss_pct=ping_res.get("packet_loss_pct"),
-            )
-            db.add(res_entry)
-            device.last_monitored_at = now
-        await db.commit()
+            await db.commit()
         for event in status_events:
             await ws_manager.broadcast("device_status_change", event)
 
