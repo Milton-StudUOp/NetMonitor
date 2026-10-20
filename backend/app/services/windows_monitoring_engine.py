@@ -258,7 +258,7 @@ class WindowsMonitoringEngine:
                 pending = await self._apply_service_result(
                     db, item, observed.get(item.name, "unknown"), None, elapsed, now, device.name)
                 if pending:
-                    pending_notifications.append(pending)
+                    pending_notifications.append((*pending, False))
             if values is not None:
                 allowed = set(enabled_metrics)
                 raw_interfaces = selected_interfaces(values.get("network_interfaces"),
@@ -284,8 +284,8 @@ class WindowsMonitoringEngine:
                     if capability:
                         capability.last_metric_collected_at = now
             await db.commit()
-        for title, message, severity, alert_id in pending_notifications:
-            schedule_persisted_notification(title, message, severity, alert_id)
+        for title, message, severity, alert_id, recovery in pending_notifications:
+            schedule_persisted_notification(title, message, severity, alert_id, recovery=recovery)
 
     async def _apply_service_result(self, db, item, observed: str, error_code: str | None,
                                     response_ms: float, now: datetime, device_name: str):

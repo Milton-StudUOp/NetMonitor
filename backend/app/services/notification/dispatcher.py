@@ -53,13 +53,15 @@ def _event_type(title: str, recovery: bool) -> str:
     upper = title.upper()
     if "REDUND" in upper:
         base = "REDUNDANCY_CRITICAL" if "CRITICAL" in upper or "CRÍTIC" in upper else "REDUNDANCY_DEGRADED"
+    elif "INTERFACE" in upper:
+        base = "INTERFACE_DOWN"
     elif "LINK" in upper or "ENLACE" in upper:
         base = "LINK_DOWN"
     else:
         base = "DEVICE_DOWN"
     if not recovery:
         return base
-    return {"DEVICE_DOWN": "DEVICE_UP", "LINK_DOWN": "LINK_UP"}.get(base, "RECOVERY")
+    return {"DEVICE_DOWN": "DEVICE_UP", "LINK_DOWN": "LINK_UP", "INTERFACE_DOWN": "INTERFACE_UP"}.get(base, "RECOVERY")
 
 
 def _rule_matches(rule, event: str, original_event: str, severity: str, recovery: bool, searchable_text: str) -> bool:
