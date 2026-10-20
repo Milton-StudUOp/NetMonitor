@@ -277,8 +277,8 @@ async def collect_metrics(device_id: int, db: AsyncSession = Depends(get_db)):
         db, device, values, capability.diagnostics or {}
     ) if capability else []
     await db.commit(); await db.refresh(item)
-    for title, message, severity, alert_id in pending_notifications:
-        schedule_persisted_notification(title, message, severity, alert_id)
+    for title, message, severity, alert_id, recovery in pending_notifications:
+        schedule_persisted_notification(title, message, severity, alert_id, recovery=recovery)
     return _metric_snapshot(item)
 
 

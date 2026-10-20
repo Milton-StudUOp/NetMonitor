@@ -174,7 +174,7 @@ class NotificationRuleInput(BaseModel):
     @classmethod
     def valid_event_type(cls, value: str) -> str:
         normalized = value.upper()
-        allowed = {"DEVICE_DOWN", "DEVICE_UP", "LINK_DOWN", "LINK_UP", "REDUNDANCY_DEGRADED", "REDUNDANCY_CRITICAL", "RECOVERY"}
+        allowed = {"DEVICE_DOWN", "DEVICE_UP", "LINK_DOWN", "LINK_UP", "INTERFACE_DOWN", "INTERFACE_UP", "REDUNDANCY_DEGRADED", "REDUNDANCY_CRITICAL", "RECOVERY"}
         if normalized not in allowed:
             raise ValueError("Unsupported notification event")
         return normalized
